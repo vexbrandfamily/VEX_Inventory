@@ -57,10 +57,10 @@ export default function RootLayout({
           <ThemeProvider>
             <SplashWrapper>
               {children}
+              <Toaster position="bottom-right" richColors closeButton />
             </SplashWrapper>
           </ThemeProvider>
         </AuthProvider>
-        <Toaster position="bottom-right" richColors closeButton />
       </body>
     </html>
   );

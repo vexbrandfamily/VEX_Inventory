@@ -1,5 +1,32 @@
 @import "tailwindcss";
 
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --font-sans: var(--font-plus-jakarta-sans), sans-serif;
+}
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
@@ -264,7 +291,7 @@ html.dark[data-theme='global-gold'] {
   --secondary: #0d213c;
   --secondary-foreground: #cbd5e1;
   --muted: #0d213c;
-  --muted-foreground: #94a3b8;
+  --muted-foreground: #cbd5e1;
   --card: #0a1a30;
   --card-foreground: #e8eef8;
   --border: #1e3a5f;

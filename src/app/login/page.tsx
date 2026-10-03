@@ -58,10 +58,10 @@ export default function LoginPage() {
       <SplashSceneBackground />
       <div className="relative z-10 w-full max-w-md">
         {/* Card */}
-        <div className="bg-card/95 backdrop-blur-md border border-white/15 rounded-2xl p-6 shadow-2xl shadow-black/40">
+        <div className="bg-card border border-white/15 rounded-2xl p-6 shadow-2xl shadow-black/40">
           <div className="mb-5">
-            <h2 className="text-base font-700 text-foreground">Sign in to your account</h2>
-            <p className="text-xs text-muted-foreground mt-1">Enter your credentials to access the platform</p>
+            <h2 className="text-lg font-700 text-foreground">Sign in to your account</h2>
+            <p className="text-sm text-muted-foreground mt-1">Enter your credentials to access the platform</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -73,7 +73,7 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="block text-xs font-600 text-foreground mb-1.5">Email address</label>
+              <label className="block text-sm font-600 text-foreground mb-1.5">Email address</label>
               <input
                 type="email"
                 value={email}
@@ -85,7 +85,7 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-600 text-foreground mb-1.5">Password</label>
+              <label className="block text-sm font-600 text-foreground mb-1.5">Password</label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
