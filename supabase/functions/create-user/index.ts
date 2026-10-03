@@ -195,6 +195,35 @@ Deno.serve(async (req) => {
       });
     }
 
+    const escapedEmailPattern = normalizedEmail.replace(/[\\%_]/g, '\\$&');
+    const { data: matchingAccount, error: accountLookupError } = await adminClient
+      .from('accounts')
+      .select('id')
+      .ilike('email', escapedEmailPattern)
+      .maybeSingle();
+
+    if (accountLookupError) {
+      return new Response(
+        JSON.stringify({
+          error: `Could not check existing accounts: ${accountLookupError.message}`,
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    if (matchingAccount) {
+      return new Response(
+        JSON.stringify({ error: 'An account with this email address already exists' }),
+        {
+          status: 409,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email: normalizedEmail,
       password,
@@ -267,36 +296,14 @@ Deno.serve(async (req) => {
         );
       }
 
-      const { data: existingProfile, error: existingProfileError } = await adminClient
-        .from('user_profiles')
-        .select('account_type')
-        .eq('id', existingUser.id)
-        .maybeSingle();
-      if (existingProfileError) {
+      if (existingAccount) {
         return new Response(
-          JSON.stringify({
-            error: `Could not check existing profile: ${existingProfileError.message}`,
-          }),
+          JSON.stringify({ error: 'The existing login is already linked to an account' }),
           {
-            status: 500,
+            status: 409,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           }
         );
-      }
-
-      const previousAccountTypes = [
-        existingProfile?.account_type,
-        existingUser.user_metadata?.account_type,
-        existingUser.app_metadata?.account_type,
-      ];
-      const wasManagedAccount = previousAccountTypes.some(
-        (type) => type === 'store' || type === 'business'
-      );
-      if (existingAccount || !wasManagedAccount) {
-        return new Response(JSON.stringify({ error: createError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
       }
 
       const { data: updatedUser, error: updateUserError } =
@@ -382,6 +389,15 @@ Deno.serve(async (req) => {
 
     if (accountError) {
       if (!reusedExistingUser) await adminClient.auth.admin.deleteUser(userId);
+      if (accountError.code === '23505') {
+        return new Response(
+          JSON.stringify({ error: 'An account with this email address already exists' }),
+          {
+            status: 409,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
       return new Response(
         JSON.stringify({ error: `Account creation failed: ${accountError.message}` }),
         {
