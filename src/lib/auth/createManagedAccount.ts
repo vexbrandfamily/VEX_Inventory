@@ -1,4 +1,4 @@
-import { createClient as createAuthClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type ManagedAccountInput = {
   name: string;
@@ -13,62 +13,22 @@ export type ManagedAccountInput = {
   logo_url?: string;
 };
 
-export async function createManagedAccount(adminClient: any, input: ManagedAccountInput) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    throw new Error('Supabase is not configured');
-  }
-
-  const isolated = createAuthClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
-
-  const { data: signUpData, error: signUpError } = await isolated.auth.signUp({
-    email: input.email,
-    password: input.password,
-    options: {
-      data: {
-        full_name: input.name,
-        account_type: input.account_type,
-        avatar_url: input.logo_url || '',
-      },
-    },
-  });
-
-  if (signUpError) throw new Error(signUpError.message);
-  const userId = signUpData.user?.id;
-  if (!userId) {
-    throw new Error(
-      'Login was created but needs email confirmation. Confirm the user in Supabase Auth, or disable Confirm email.'
-    );
-  }
-
-  const { error: profileError } = await adminClient.from('user_profiles').upsert(
-    {
-      id: userId,
-      email: input.email,
-      full_name: input.name,
-      account_type: input.account_type,
-      avatar_url: input.logo_url || '',
-      is_active: true,
-    },
-    { onConflict: 'id' }
+export async function createManagedAccount(supabase: SupabaseClient, input: ManagedAccountInput) {
+  const { data, error } = await supabase.functions.invoke<{ success: boolean; error?: string }>(
+    'create-user',
+    { body: input }
   );
-  if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
 
-  const { error: accountError } = await adminClient.from('accounts').insert({
-    user_id: userId,
-    name: input.name,
-    email: input.email,
-    contacts: input.contacts || '',
-    account_type: input.account_type,
-    country: input.country || '',
-    town: input.town.trim(),
-    country_code: input.country_code || '',
-    currency_code: input.currency_code || 'USD',
-    logo_url: input.logo_url || '',
-    status: 'active',
-  });
-  if (accountError) throw new Error(`Account creation failed: ${accountError.message}`);
+  if (error) {
+    let message = error.message;
+    if (error.context instanceof Response) {
+      const body = await error.context.json().catch(() => null);
+      if (typeof body?.error === 'string') message = body.error;
+    }
+    throw new Error(message);
+  }
+
+  if (!data?.success) {
+    throw new Error(data?.error || 'Account creation failed');
+  }
 }

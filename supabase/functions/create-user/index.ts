@@ -93,8 +93,18 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { name, email, password, account_type, country, country_code, currency_code, logo_url } =
-      body;
+    const {
+      name,
+      email,
+      password,
+      account_type,
+      country,
+      town,
+      contacts,
+      country_code,
+      currency_code,
+      logo_url,
+    } = body;
 
     if (!name || !email || !password || !account_type || !country_code) {
       return new Response(
@@ -129,14 +139,127 @@ Deno.serve(async (req) => {
       },
     });
 
+    let user = newUser?.user;
+    let reusedExistingUser = false;
+
     if (createError) {
-      return new Response(JSON.stringify({ error: createError.message }), {
-        status: 400,
+      const pageSize = 1000;
+      let existingUser: {
+        id: string;
+        email?: string;
+        user_metadata: Record<string, unknown>;
+        app_metadata: Record<string, unknown>;
+      } | null = null;
+      for (let page = 1; !existingUser; page += 1) {
+        const { data: users, error: listError } = await adminClient.auth.admin.listUsers({
+          page,
+          perPage: pageSize,
+        });
+        if (listError) {
+          return new Response(
+            JSON.stringify({ error: `Could not check existing users: ${listError.message}` }),
+            {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        existingUser =
+          users.users.find(
+            (candidate: NonNullable<typeof existingUser>) =>
+              candidate.email?.toLowerCase() === String(email).toLowerCase()
+          ) || null;
+        if (existingUser || users.users.length < pageSize) break;
+      }
+
+      if (!existingUser) {
+        return new Response(JSON.stringify({ error: createError.message }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const { data: existingAccount, error: existingAccountError } = await adminClient
+        .from('accounts')
+        .select('id')
+        .eq('user_id', existingUser.id)
+        .maybeSingle();
+      if (existingAccountError) {
+        return new Response(
+          JSON.stringify({
+            error: `Could not check existing account: ${existingAccountError.message}`,
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const { data: existingProfile, error: existingProfileError } = await adminClient
+        .from('user_profiles')
+        .select('account_type')
+        .eq('id', existingUser.id)
+        .maybeSingle();
+      if (existingProfileError) {
+        return new Response(
+          JSON.stringify({
+            error: `Could not check existing profile: ${existingProfileError.message}`,
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const previousAccountType =
+        existingProfile?.account_type || existingUser.user_metadata?.account_type;
+      if (existingAccount || previousAccountType !== account_type) {
+        return new Response(JSON.stringify({ error: createError.message }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const { data: updatedUser, error: updateUserError } =
+        await adminClient.auth.admin.updateUserById(existingUser.id, {
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: {
+            ...existingUser.user_metadata,
+            full_name: name,
+            account_type,
+            avatar_url: logo_url || '',
+          },
+          app_metadata: {
+            ...existingUser.app_metadata,
+            account_type,
+          },
+        });
+      if (updateUserError) {
+        return new Response(
+          JSON.stringify({ error: `Could not restore previous login: ${updateUserError.message}` }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      user = updatedUser.user;
+      reusedExistingUser = true;
+    }
+
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'User creation did not return a user' }), {
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-
-    const userId = newUser.user.id;
+    const userId = user.id;
 
     const { error: profileError } = await adminClient.from('user_profiles').upsert(
       {
@@ -151,7 +274,7 @@ Deno.serve(async (req) => {
     );
 
     if (profileError) {
-      await adminClient.auth.admin.deleteUser(userId);
+      if (!reusedExistingUser) await adminClient.auth.admin.deleteUser(userId);
       return new Response(
         JSON.stringify({ error: `Profile creation failed: ${profileError.message}` }),
         {
@@ -167,18 +290,22 @@ Deno.serve(async (req) => {
         user_id: userId,
         name,
         email,
+        contacts: contacts || '',
         account_type,
         country: country || '',
+        town: town || '',
         country_code: country_code || '',
         currency_code: currency_code || 'USD',
         logo_url: logo_url || '',
         status: 'active',
       })
-      .select('id, user_id, name, email, account_type, country, country_code, currency_code, logo_url, status')
+      .select(
+        'id, user_id, name, email, contacts, account_type, country, town, country_code, currency_code, logo_url, status'
+      )
       .single();
 
     if (accountError) {
-      await adminClient.auth.admin.deleteUser(userId);
+      if (!reusedExistingUser) await adminClient.auth.admin.deleteUser(userId);
       return new Response(
         JSON.stringify({ error: `Account creation failed: ${accountError.message}` }),
         {
