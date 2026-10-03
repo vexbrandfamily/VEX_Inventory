@@ -52,7 +52,6 @@ export async function createManagedAccount(supabase: SupabaseClient, input: Mana
   }
 
   await invokeAccountFunction(supabase, { ...input, email });
-  await invokeAccountFunction(supabase, input);
 }
 
 export async function deleteManagedAccount(supabase: SupabaseClient, accountId: string) {
