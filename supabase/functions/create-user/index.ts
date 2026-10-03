@@ -273,10 +273,16 @@ Deno.serve(async (req) => {
       }
 
       if (!existingUser) {
-        return new Response(JSON.stringify({ error: createError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({
+            error:
+              'Supabase Auth reports this email is registered, but no matching Auth user could be found. Check the Auth users list or contact your Supabase administrator.',
+          }),
+          {
+            status: 409,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
       }
 
       const { data: existingAccount, error: existingAccountError } = await adminClient

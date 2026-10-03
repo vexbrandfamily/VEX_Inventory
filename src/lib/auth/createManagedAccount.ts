@@ -36,6 +36,22 @@ async function invokeAccountFunction(
 }
 
 export async function createManagedAccount(supabase: SupabaseClient, input: ManagedAccountInput) {
+  const email = input.email.trim();
+  const escapedEmailPattern = email.replace(/[\\%_]/g, '\\$&');
+  const { data: existingAccount, error: accountLookupError } = await supabase
+    .from('accounts')
+    .select('id')
+    .ilike('email', escapedEmailPattern)
+    .maybeSingle();
+
+  if (accountLookupError) {
+    throw new Error(`Could not check existing accounts: ${accountLookupError.message}`);
+  }
+  if (existingAccount) {
+    throw new Error('An account with this email address already exists');
+  }
+
+  await invokeAccountFunction(supabase, { ...input, email });
   await invokeAccountFunction(supabase, input);
 }
 
