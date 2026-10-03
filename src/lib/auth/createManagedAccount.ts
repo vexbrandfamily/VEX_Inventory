@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { createClient as createAuthClient } from '@supabase/supabase-js';
 
 export type ManagedAccountInput = {
   name: string;
@@ -13,52 +13,62 @@ export type ManagedAccountInput = {
   logo_url?: string;
 };
 
-type ManagedAccountResponse = { success: boolean; error?: string };
+export async function createManagedAccount(adminClient: any, input: ManagedAccountInput) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error('Supabase is not configured');
+  }
 
-async function invokeAccountFunction(
-  supabase: SupabaseClient,
-  body: ManagedAccountInput | { action: 'delete_account'; account_id: string }
-) {
-  const { data, error } = await supabase.functions.invoke<ManagedAccountResponse>('create-user', {
-    body,
+  const isolated = createAuthClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
 
-  if (error) {
-    let message = error.message;
-    if (error.context instanceof Response) {
-      const body = await error.context.json().catch(() => null);
-      if (typeof body?.error === 'string') message = body.error;
-    }
-    if (/a user with this email address has already been registered/i.test(message)) {
-      throw new Error(
-        'The deployed create-user function is outdated and is rejecting this email before checking the accounts table. Deploy the latest supabase/functions/create-user/index.ts, then reload the app.'
-      );
-    }
-    throw new Error(message);
+  const { data: signUpData, error: signUpError } = await isolated.auth.signUp({
+    email: input.email,
+    password: input.password,
+    options: {
+      data: {
+        full_name: input.name,
+        account_type: input.account_type,
+        avatar_url: input.logo_url || '',
+      },
+    },
+  });
+
+  if (signUpError) throw new Error(signUpError.message);
+  const userId = signUpData.user?.id;
+  if (!userId) {
+    throw new Error(
+      'Login was created but needs email confirmation. Confirm the user in Supabase Auth, or disable Confirm email.'
+    );
   }
 
-  if (!data?.success) throw new Error(data?.error || 'Account operation failed');
-}
+  const { error: profileError } = await adminClient.from('user_profiles').upsert(
+    {
+      id: userId,
+      email: input.email,
+      full_name: input.name,
+      account_type: input.account_type,
+      avatar_url: input.logo_url || '',
+      is_active: true,
+    },
+    { onConflict: 'id' }
+  );
+  if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
 
-export async function createManagedAccount(supabase: SupabaseClient, input: ManagedAccountInput) {
-  const email = input.email.trim();
-  const escapedEmailPattern = email.replace(/[\\%_]/g, '\\$&');
-  const { data: existingAccount, error: accountLookupError } = await supabase
-    .from('accounts')
-    .select('id')
-    .ilike('email', escapedEmailPattern)
-    .maybeSingle();
-
-  if (accountLookupError) {
-    throw new Error(`Could not check existing accounts: ${accountLookupError.message}`);
-  }
-  if (existingAccount) {
-    throw new Error('An account with this email address already exists');
-  }
-
-  await invokeAccountFunction(supabase, { ...input, email });
-}
-
-export async function deleteManagedAccount(supabase: SupabaseClient, accountId: string) {
-  await invokeAccountFunction(supabase, { action: 'delete_account', account_id: accountId });
+  const { error: accountError } = await adminClient.from('accounts').insert({
+    user_id: userId,
+    name: input.name,
+    email: input.email,
+    contacts: input.contacts || '',
+    account_type: input.account_type,
+    country: input.country || '',
+    town: input.town.trim(),
+    country_code: input.country_code || '',
+    currency_code: input.currency_code || 'USD',
+    logo_url: input.logo_url || '',
+    status: 'active',
+  });
+  if (accountError) throw new Error(`Account creation failed: ${accountError.message}`);
 }

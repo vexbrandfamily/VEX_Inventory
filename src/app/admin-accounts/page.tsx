@@ -20,7 +20,7 @@ import ResponsiveRecordList, { RecordColumn } from '@/components/ui/ResponsiveRe
 import AccountAvatar from '@/components/AccountAvatar';
 import StatusBadge from '@/components/ui/StatusBadge';
 import { getCountryByPhoneCode, getCurrencySymbol } from '@/lib/countries';
-import { createManagedAccount, deleteManagedAccount } from '@/lib/auth/createManagedAccount';
+import { createManagedAccount } from '@/lib/auth/createManagedAccount';
 
 interface Account {
   id: string;
@@ -242,14 +242,8 @@ export default function AdminAccountsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this account? This cannot be undone.')) return;
-    setError(null);
-    try {
-      await deleteManagedAccount(supabase, id);
-    } catch (e: any) {
-      setError(e.message);
-      return;
-    }
-    fetchAccounts();
+    const { error: err } = await supabase.from('accounts').delete().eq('id', id);
+    if (!err) fetchAccounts();
   };
 
   const handleToggleStatus = async (account: Account) => {
