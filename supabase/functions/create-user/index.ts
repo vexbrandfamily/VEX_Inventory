@@ -94,6 +94,8 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const {
+      action,
+      account_id,
       name,
       email,
       password,
@@ -105,6 +107,74 @@ Deno.serve(async (req) => {
       currency_code,
       logo_url,
     } = body;
+
+    if (action === 'delete_account') {
+      if (typeof account_id !== 'string' || !account_id) {
+        return new Response(JSON.stringify({ error: 'Missing account_id' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const { data: accountToDelete, error: lookupError } = await adminClient
+        .from('accounts')
+        .select('id, user_id')
+        .eq('id', account_id)
+        .maybeSingle();
+      if (lookupError || !accountToDelete) {
+        return new Response(
+          JSON.stringify({ error: lookupError?.message || 'Account not found' }),
+          {
+            status: lookupError ? 500 : 404,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const { error: deleteAccountError } = await adminClient
+        .from('accounts')
+        .delete()
+        .eq('id', account_id);
+      if (deleteAccountError) {
+        return new Response(
+          JSON.stringify({ error: `Account deletion failed: ${deleteAccountError.message}` }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      if (accountToDelete.user_id) {
+        const { error: deleteUserError } = await adminClient.auth.admin.deleteUser(
+          accountToDelete.user_id
+        );
+        if (deleteUserError) {
+          return new Response(
+            JSON.stringify({
+              error: `Account was deleted, but its login could not be removed: ${deleteUserError.message}`,
+            }),
+            {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const normalizedEmail = typeof email === 'string' ? email.trim() : '';
+    if (!normalizedEmail) {
+      return new Response(JSON.stringify({ error: 'Email is required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     if (!name || !email || !password || !account_type || !country_code) {
       return new Response(
@@ -126,7 +196,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
-      email,
+      email: normalizedEmail,
       password,
       email_confirm: true,
       user_metadata: {
@@ -168,7 +238,7 @@ Deno.serve(async (req) => {
         existingUser =
           users.users.find(
             (candidate: NonNullable<typeof existingUser>) =>
-              candidate.email?.toLowerCase() === String(email).toLowerCase()
+              candidate.email?.trim().toLowerCase() === normalizedEmail.toLowerCase()
           ) || null;
         if (existingUser || users.users.length < pageSize) break;
       }
@@ -214,9 +284,15 @@ Deno.serve(async (req) => {
         );
       }
 
-      const previousAccountType =
-        existingProfile?.account_type || existingUser.user_metadata?.account_type;
-      if (existingAccount || previousAccountType !== account_type) {
+      const previousAccountTypes = [
+        existingProfile?.account_type,
+        existingUser.user_metadata?.account_type,
+        existingUser.app_metadata?.account_type,
+      ];
+      const wasManagedAccount = previousAccountTypes.some(
+        (type) => type === 'store' || type === 'business'
+      );
+      if (existingAccount || !wasManagedAccount) {
         return new Response(JSON.stringify({ error: createError.message }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -225,7 +301,7 @@ Deno.serve(async (req) => {
 
       const { data: updatedUser, error: updateUserError } =
         await adminClient.auth.admin.updateUserById(existingUser.id, {
-          email,
+          email: normalizedEmail,
           password,
           email_confirm: true,
           user_metadata: {
@@ -264,7 +340,7 @@ Deno.serve(async (req) => {
     const { error: profileError } = await adminClient.from('user_profiles').upsert(
       {
         id: userId,
-        email,
+        email: normalizedEmail,
         full_name: name,
         account_type,
         avatar_url: logo_url || '',
@@ -289,7 +365,7 @@ Deno.serve(async (req) => {
       .insert({
         user_id: userId,
         name,
-        email,
+        email: normalizedEmail,
         contacts: contacts || '',
         account_type,
         country: country || '',

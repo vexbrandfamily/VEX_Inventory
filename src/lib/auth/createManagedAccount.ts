@@ -13,11 +13,15 @@ export type ManagedAccountInput = {
   logo_url?: string;
 };
 
-export async function createManagedAccount(supabase: SupabaseClient, input: ManagedAccountInput) {
-  const { data, error } = await supabase.functions.invoke<{ success: boolean; error?: string }>(
-    'create-user',
-    { body: input }
-  );
+type ManagedAccountResponse = { success: boolean; error?: string };
+
+async function invokeAccountFunction(
+  supabase: SupabaseClient,
+  body: ManagedAccountInput | { action: 'delete_account'; account_id: string }
+) {
+  const { data, error } = await supabase.functions.invoke<ManagedAccountResponse>('create-user', {
+    body,
+  });
 
   if (error) {
     let message = error.message;
@@ -28,7 +32,13 @@ export async function createManagedAccount(supabase: SupabaseClient, input: Mana
     throw new Error(message);
   }
 
-  if (!data?.success) {
-    throw new Error(data?.error || 'Account creation failed');
-  }
+  if (!data?.success) throw new Error(data?.error || 'Account operation failed');
+}
+
+export async function createManagedAccount(supabase: SupabaseClient, input: ManagedAccountInput) {
+  await invokeAccountFunction(supabase, input);
+}
+
+export async function deleteManagedAccount(supabase: SupabaseClient, accountId: string) {
+  await invokeAccountFunction(supabase, { action: 'delete_account', account_id: accountId });
 }

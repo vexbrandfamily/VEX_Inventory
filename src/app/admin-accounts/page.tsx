@@ -20,7 +20,7 @@ import ResponsiveRecordList, { RecordColumn } from '@/components/ui/ResponsiveRe
 import AccountAvatar from '@/components/AccountAvatar';
 import StatusBadge from '@/components/ui/StatusBadge';
 import { getCountryByPhoneCode, getCurrencySymbol } from '@/lib/countries';
-import { createManagedAccount } from '@/lib/auth/createManagedAccount';
+import { createManagedAccount, deleteManagedAccount } from '@/lib/auth/createManagedAccount';
 
 interface Account {
   id: string;
@@ -102,8 +102,7 @@ export default function AdminAccountsPage() {
 
   const searchTerm = search.trim().toLowerCase();
   const filtered = accounts.filter((a) =>
-    [a.name, a.email, a.country, a.town]
-      .some((value) => value?.toLowerCase().includes(searchTerm))
+    [a.name, a.email, a.country, a.town].some((value) => value?.toLowerCase().includes(searchTerm))
   );
 
   const handleCountryChange = (code: string) => {
@@ -134,8 +133,7 @@ export default function AdminAccountsPage() {
         {
           id: session.user.id,
           email: session.user.email ?? '',
-          full_name:
-            (session.user.user_metadata?.full_name as string) || session.user.email || '',
+          full_name: (session.user.user_metadata?.full_name as string) || session.user.email || '',
           avatar_url: (session.user.user_metadata?.avatar_url as string) || '',
           account_type: 'admin',
           is_active: true,
@@ -244,8 +242,14 @@ export default function AdminAccountsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this account? This cannot be undone.')) return;
-    const { error: err } = await supabase.from('accounts').delete().eq('id', id);
-    if (!err) fetchAccounts();
+    setError(null);
+    try {
+      await deleteManagedAccount(supabase, id);
+    } catch (e: any) {
+      setError(e.message);
+      return;
+    }
+    fetchAccounts();
   };
 
   const handleToggleStatus = async (account: Account) => {
