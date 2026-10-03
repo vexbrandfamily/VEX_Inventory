@@ -29,6 +29,11 @@ async function invokeAccountFunction(
       const body = await error.context.json().catch(() => null);
       if (typeof body?.error === 'string') message = body.error;
     }
+    if (/a user with this email address has already been registered/i.test(message)) {
+      throw new Error(
+        'The deployed create-user function is outdated and is rejecting this email before checking the accounts table. Deploy the latest supabase/functions/create-user/index.ts, then reload the app.'
+      );
+    }
     throw new Error(message);
   }
 

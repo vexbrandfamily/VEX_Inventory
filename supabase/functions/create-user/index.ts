@@ -312,6 +312,35 @@ Deno.serve(async (req) => {
         );
       }
 
+      const { data: existingProfile, error: existingProfileError } = await adminClient
+        .from('user_profiles')
+        .select('account_type')
+        .eq('id', existingUser.id)
+        .maybeSingle();
+      if (existingProfileError) {
+        return new Response(
+          JSON.stringify({
+            error: `Could not check existing profile: ${existingProfileError.message}`,
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const wasManagedAccount = [
+        existingProfile?.account_type,
+        existingUser.user_metadata?.account_type,
+        existingUser.app_metadata?.account_type,
+      ].some((type) => type === 'store' || type === 'business');
+      if (!wasManagedAccount) {
+        return new Response(JSON.stringify({ error: createError.message }), {
+          status: 409,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       const { data: updatedUser, error: updateUserError } =
         await adminClient.auth.admin.updateUserById(existingUser.id, {
           email: normalizedEmail,
