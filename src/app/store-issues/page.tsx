@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { fetchAllRows } from '@/lib/supabase/fetchAllRows';
 import { useAuth } from '@/contexts/AuthContext';
 import { applyStockMovement, normalizeStatus } from '@/lib/stockMath';
-import { ArrowUpFromLine, Plus, RefreshCw, Search, X, Eye, Pencil, Trash2 } from 'lucide-react';
+import { ArrowUpFromLine, Plus, RefreshCw, Search, ChevronDown, X, Eye, Pencil, Trash2 } from 'lucide-react';
 import ResponsiveRecordList, { RecordColumn } from '@/components/ui/ResponsiveRecordList';
 
 interface StoreItem {
@@ -62,6 +62,8 @@ export default function StoreIssuesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editIssue, setEditIssue] = useState<StoreIssue | null>(null);
   const [viewIssue, setViewIssue] = useState<StoreIssue | null>(null);
+  const [itemSearch, setItemSearch] = useState('');
+  const [showItemOptions, setShowItemOptions] = useState(false);
   const [form, setForm] = useState<IssueForm>(defaultForm);
   const [submitting, setSubmitting] = useState(false);
 
@@ -108,6 +110,8 @@ export default function StoreIssuesPage() {
   const openModal = () => {
     setEditIssue(null);
     setForm({ ...defaultForm, issue_date: new Date().toISOString().split('T')[0] });
+    setItemSearch('');
+    setShowItemOptions(false);
     setError(null);
     setShowModal(true);
   };
@@ -124,9 +128,22 @@ export default function StoreIssuesPage() {
       quantity: String(issue.quantity),
       issue_type: issue.issue_type,
     });
+    setItemSearch(issue.item_name);
+    setShowItemOptions(false);
     setShowModal(true);
     setError(null);
   };
+
+  const handleItemSelect = (itemId: string) => {
+    const item = storeItems.find((candidate) => candidate.id === itemId);
+    setForm((current) => ({ ...current, item_id: itemId, item_name: item?.name || '' }));
+    setItemSearch(item?.name || '');
+    setShowItemOptions(false);
+  };
+
+  const filteredStoreItems = storeItems.filter((item) =>
+    item.name.toLowerCase().includes(itemSearch.toLowerCase())
+  );
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -233,14 +250,57 @@ export default function StoreIssuesPage() {
         <ResponsiveRecordList rows={filtered} getRowId={(issue) => issue.id} loading={loading} skeletonRows={5} footer={`${filtered.length} issue${filtered.length !== 1 ? 's' : ''}`} empty={<div className="px-4 py-16 text-center"><div className="flex flex-col items-center gap-2 text-muted-foreground"><ArrowUpFromLine size={32} className="opacity-30" /><p>No issues recorded yet.</p></div></div>} columns={issueColumns} />
       </div>
 
-      {showModal && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4"><div className="px-6 py-4 border-b border-border flex items-center justify-between"><h2 className="font-700 text-foreground">{editIssue ? 'Edit Issue' : 'New Issue'}</h2><button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-muted transition-colors"><X size={16} className="text-muted-foreground" /></button></div><form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
-        <div><label className="block text-xs font-600 text-muted-foreground mb-1">Item *</label><select required value={form.item_id} onChange={(event) => { const item = storeItems.find((candidate) => candidate.id === event.target.value); setForm({ ...form, item_id: event.target.value, item_name: item?.name || '' }); }} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"><option value="">Select item...</option>{storeItems.map((item) => <option key={item.id} value={item.id}>{item.name} (Stock: {item.current_stock})</option>)}</select></div>
+      {showModal && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"><div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4"><div className="px-6 py-4 border-b border-border flex items-center justify-between"><h2 className="font-700 text-foreground">{editIssue ? 'Edit Issue' : 'New Issue'}</h2><button onClick={() => { setShowModal(false); setShowItemOptions(false); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors"><X size={16} className="text-muted-foreground" /></button></div><form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+        <div className="relative">
+          <label className="block text-xs font-600 text-muted-foreground mb-1">Item *</label>
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={itemSearch}
+              onFocus={() => setShowItemOptions(true)}
+              onChange={(event) => {
+                setItemSearch(event.target.value);
+                setForm((current) => ({ ...current, item_id: '', item_name: '' }));
+                setShowItemOptions(true);
+              }}
+              placeholder="Search or select an item..."
+              className="w-full pl-8 pr-9 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setItemSearch('');
+                setShowItemOptions(true);
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+              aria-label="Show all items"
+            >
+              <ChevronDown size={16} />
+            </button>
+          </div>
+          {showItemOptions && (
+            <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 shadow-lg">
+              {filteredStoreItems.length > 0 ? filteredStoreItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleItemSelect(item.id)}
+                  className={`block w-full px-3 py-2 text-left text-sm hover:bg-muted ${form.item_id === item.id ? 'bg-muted font-600 text-primary' : 'text-foreground'}`}
+                >
+                  {item.name}
+                </button>
+              )) : (
+                <p className="px-3 py-2 text-sm text-muted-foreground">No items found.</p>
+              )}
+            </div>
+          )}
+        </div>
         <div><label className="block text-xs font-600 text-muted-foreground mb-1">Date *</label><input required type="date" value={form.issue_date} onChange={(event) => setForm({ ...form, issue_date: event.target.value })} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" /></div>
         <div><label className="block text-xs font-600 text-muted-foreground mb-1">To whom Issued *</label><input required value={form.issued_to} onChange={(event) => setForm({ ...form, issued_to: event.target.value })} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" /></div>
         <div><label className="block text-xs font-600 text-muted-foreground mb-1">ID No. or Contacts</label><input value={form.identity_or_contacts} onChange={(event) => setForm({ ...form, identity_or_contacts: event.target.value })} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" /></div>
         <div><label className="block text-xs font-600 text-muted-foreground mb-1">Inventory No</label><input value={form.inventory_number} onChange={(event) => setForm({ ...form, inventory_number: event.target.value })} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" /></div>
         <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-600 text-muted-foreground mb-1">Quantity *</label><input required type="number" min="1" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" /></div><div><label className="block text-xs font-600 text-muted-foreground mb-1">Disposition *</label><select required value={form.issue_type} onChange={(event) => setForm({ ...form, issue_type: event.target.value as IssueForm['issue_type'] })} className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"><option value="permanent_transfer">Permanent Transfer</option><option value="writes_off">Writes Off</option></select></div></div>
-        {error && <p className="text-xs text-danger">{error}</p>}<div className="flex gap-3 pt-2"><button type="button" onClick={() => setShowModal(false)} className="flex-1 px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">Cancel</button><button type="submit" disabled={submitting} className="flex-1 px-4 py-2 text-sm text-white rounded-lg hover:opacity-90 transition-colors font-medium disabled:opacity-60 bg-danger">{submitting ? 'Saving...' : editIssue ? 'Update Issue' : 'Save Issue'}</button></div>
+        {error && <p className="text-xs text-danger">{error}</p>}<div className="flex gap-3 pt-2"><button type="button" onClick={() => { setShowModal(false); setShowItemOptions(false); }} className="flex-1 px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">Cancel</button><button type="submit" disabled={submitting} className="flex-1 px-4 py-2 text-sm text-white rounded-lg hover:opacity-90 transition-colors font-medium disabled:opacity-60 bg-danger">{submitting ? 'Saving...' : editIssue ? 'Update Issue' : 'Save Issue'}</button></div>
       </form></div></div>}
 
       {viewIssue && (

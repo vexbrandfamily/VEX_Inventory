@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { fetchAllRows } from '@/lib/supabase/fetchAllRows';
 import { useAuth } from '@/contexts/AuthContext';
 import { applyStockMovement, normalizeStatus } from '@/lib/stockMath';
-import { Search, Plus, RefreshCw, ArrowDownToLine, SlidersHorizontal, X, Eye, Pencil, Trash2 } from 'lucide-react';
+import { Search, Plus, RefreshCw, ArrowDownToLine, SlidersHorizontal, ChevronDown, X, Eye, Pencil, Trash2 } from 'lucide-react';
 import ResponsiveRecordList, { RecordColumn } from '@/components/ui/ResponsiveRecordList';
 
 
@@ -65,6 +65,8 @@ export default function StoreStockInPage() {
   const [showModal, setShowModal] = useState(false);
   const [editMovement, setEditMovement] = useState<Movement | null>(null);
   const [viewMovement, setViewMovement] = useState<Movement | null>(null);
+  const [itemSearch, setItemSearch] = useState('');
+  const [showItemOptions, setShowItemOptions] = useState(false);
   const [form, setForm] = useState<MovementForm>(defaultForm);
   const [submitting, setSubmitting] = useState(false);
 
@@ -121,6 +123,8 @@ export default function StoreStockInPage() {
   const openModal = () => {
     setEditMovement(null);
     setForm(defaultForm);
+    setItemSearch('');
+    setShowItemOptions(false);
     setShowModal(true);
   };
 
@@ -135,14 +139,22 @@ export default function StoreStockInPage() {
       notes: movement.notes,
       reason: movement.reason,
     });
+    setItemSearch(movement.item_name);
+    setShowItemOptions(false);
     setShowModal(true);
     setError(null);
   };
 
   const handleItemSelect = (itemId: string) => {
     const item = storeItems.find((i) => i.id === itemId);
-    setForm({ ...form, item_id: itemId, item_name: item?.name || '' });
+    setForm((current) => ({ ...current, item_id: itemId, item_name: item?.name || '' }));
+    setItemSearch(item?.name || '');
+    setShowItemOptions(false);
   };
+
+  const filteredStoreItems = storeItems.filter((item) =>
+    item.name.toLowerCase().includes(itemSearch.toLowerCase())
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -326,7 +338,7 @@ export default function StoreStockInPage() {
           <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4">
             <div className="px-6 py-4 border-b border-border flex items-center justify-between">
               <h2 className="font-700 text-foreground">{editMovement ? 'Edit Adjustment In' : 'New Adjustment In'}</h2>
-              <button onClick={() => { setShowModal(false); setError(null); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+              <button onClick={() => { setShowModal(false); setShowItemOptions(false); setError(null); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
                 <X size={16} className="text-muted-foreground" />
               </button>
             </div>
@@ -336,15 +348,49 @@ export default function StoreStockInPage() {
                 <input value={form.reference_number} onChange={(e) => setForm({ ...form, reference_number: e.target.value })}
                   className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" />
               </div>
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-600 text-muted-foreground mb-1">Item *</label>
-                <select required value={form.item_id} onChange={(e) => handleItemSelect(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30">
-                  <option value="">Select item...</option>
-                  {storeItems.map((item) => (
-                    <option key={item.id} value={item.id}>{item.name} (Stock: {item.current_stock})</option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={itemSearch}
+                    onFocus={() => setShowItemOptions(true)}
+                    onChange={(e) => {
+                      setItemSearch(e.target.value);
+                      setForm((current) => ({ ...current, item_id: '', item_name: '' }));
+                      setShowItemOptions(true);
+                    }}
+                    placeholder="Search or select an item..."
+                    className="w-full pl-8 pr-9 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setItemSearch('');
+                      setShowItemOptions(true);
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+                    aria-label="Show all items"
+                  >
+                    <ChevronDown size={16} />
+                  </button>
+                </div>
+                {showItemOptions && (
+                  <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 shadow-lg">
+                    {filteredStoreItems.length > 0 ? filteredStoreItems.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleItemSelect(item.id)}
+                        className={`block w-full px-3 py-2 text-left text-sm hover:bg-muted ${form.item_id === item.id ? 'bg-muted font-600 text-primary' : 'text-foreground'}`}
+                      >
+                        {item.name}
+                      </button>
+                    )) : (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">No items found.</p>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -370,7 +416,7 @@ export default function StoreStockInPage() {
               </div>
               {error && <p className="text-xs text-danger">{error}</p>}
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowModal(false); setError(null); }}
+                <button type="button" onClick={() => { setShowModal(false); setShowItemOptions(false); setError(null); }}
                   className="flex-1 px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">Cancel</button>
                 <button type="submit" disabled={submitting}
                   className={`flex-1 px-4 py-2 text-sm text-white rounded-lg hover:opacity-90 transition-colors font-medium disabled:opacity-60 ${typeConfig.bg}`}>
