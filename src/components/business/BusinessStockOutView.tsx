@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useAccountCurrency } from '@/hooks/useAccountCurrency';
 import { formatMoney } from '@/lib/countries';
 import { applyStockMovement, normalizeStatus } from '@/lib/stockMath';
-import { Search, Plus, RefreshCw, ArrowUpFromLine, SlidersHorizontal, X, Eye, Pencil, Trash2 } from 'lucide-react';
+import { Search, Plus, RefreshCw, ArrowUpFromLine, SlidersHorizontal, ChevronDown, X, Eye, Pencil, Trash2 } from 'lucide-react';
 import ResponsiveRecordList, { RecordColumn } from '@/components/ui/ResponsiveRecordList';
 
 type StockOutSubtype = 'sale' | 'adjustment_out';
@@ -26,6 +26,8 @@ interface Transaction {
   quantity: number;
   cashier_name: string;
   payment_method: string;
+  payment_receipt_numbers?: string[];
+  customer_name: string;
   detail: string;
   reason: string;
   created_at: string;
@@ -58,16 +60,23 @@ interface TxForm {
   discount_amount: string;
   cashier_name: string;
   payment_method: string;
+  customer_name: string;
   notes: string;
   reason: string;
 }
 
 const defaultForm: TxForm = {
   reference_number: '', product_id: '', product_name: '', quantity: '1',
-  unit_price: '0', discount_amount: '0', cashier_name: '', payment_method: 'Cash', notes: '', reason: '',
+  unit_price: '0', discount_amount: '0', cashier_name: '', payment_method: 'Cash', customer_name: '', notes: '', reason: '',
 };
 
-const displayPaymentMethod = (paymentMethod: string) => paymentMethod === 'Card' ? 'Transfers' : paymentMethod;
+const displayPaymentMethod = (paymentMethod: string) => {
+  if (paymentMethod === 'Card') return 'Transfers';
+  if (paymentMethod === 'Invoice') return 'Credit';
+  return paymentMethod;
+};
+
+const toCents = (amount: number) => Math.round(amount * 100);
 
 function toLocalDateInputValue(timestamp: string): string {
   const date = new Date(timestamp);
@@ -107,13 +116,15 @@ export default function BusinessStockOutView({
   const [showModal, setShowModal] = useState(false);
   const [viewTransaction, setViewTransaction] = useState<Transaction | null>(null);
   const [editTransaction, setEditTransaction] = useState<Transaction | null>(null);
+  const [productSearch, setProductSearch] = useState('');
+  const [showProductOptions, setShowProductOptions] = useState(false);
   const [form, setForm] = useState<TxForm>(defaultForm);
   const [submitting, setSubmitting] = useState(false);
   const [accountId, setAccountId] = useState<string | null>(null);
 
   const { user } = useAuth();
   const { currencyCode } = useAccountCurrency();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const loadAccountId = useCallback(async () => {
     if (!user?.id && !user?.email) {
@@ -165,7 +176,39 @@ export default function BusinessStockOutView({
       }
 
       const data = await fetchAllRows((from, to) => query.range(from, to));
-      setTransactions(data ?? []);
+      let transactionsWithPaymentReceipts: Transaction[] = data ?? [];
+
+      const creditSales = transactionsWithPaymentReceipts.filter(
+        (transaction) => activeTab === 'sales' && transaction.payment_method === 'Credit',
+      );
+      if (creditSales.length) {
+        let paymentsQuery = supabase
+          .from('business_credit_payments')
+          .select('transaction_id, amount, reference_number')
+          .in('transaction_id', creditSales.map((transaction) => transaction.id))
+          .order('created_at', { ascending: true });
+        if (currentAccountId) paymentsQuery = paymentsQuery.eq('account_id', currentAccountId);
+
+        const payments = await fetchAllRows((from, to) => paymentsQuery.range(from, to));
+        const paymentsByTransaction = new Map<string, { amountCents: number; receipts: string[] }>();
+        for (const payment of payments) {
+          const paymentSummary = paymentsByTransaction.get(payment.transaction_id) ?? { amountCents: 0, receipts: [] };
+          paymentSummary.amountCents += toCents(Number(payment.amount || 0));
+          if (payment.reference_number) paymentSummary.receipts.push(payment.reference_number);
+          paymentsByTransaction.set(payment.transaction_id, paymentSummary);
+        }
+
+        transactionsWithPaymentReceipts = transactionsWithPaymentReceipts.map((transaction) => {
+          if (transaction.payment_method !== 'Credit') return transaction;
+          const paymentSummary = paymentsByTransaction.get(transaction.id);
+          if (!paymentSummary || paymentSummary.amountCents < toCents(Number(transaction.total_amount || 0))) {
+            return transaction;
+          }
+          return { ...transaction, payment_receipt_numbers: paymentSummary.receipts };
+        });
+      }
+
+      setTransactions(transactionsWithPaymentReceipts);
 
       if (activeTab === 'sales' && data?.length) {
         const salesLines: SaleLine[] = [];
@@ -222,6 +265,7 @@ export default function BusinessStockOutView({
         transaction.detail,
         displayPaymentMethod(transaction.payment_method),
         transaction.cashier_name,
+        transaction.customer_name,
       ].some((value) => value?.toLowerCase().includes(normalizedSearch));
       return matchesSearch;
     });
@@ -240,6 +284,7 @@ export default function BusinessStockOutView({
       transaction.reference_number,
       transaction.payment_method,
       transaction.cashier_name,
+      transaction.customer_name,
     ].some((value) => value?.toLowerCase().includes(normalizedSearch)));
 
     return [
@@ -276,6 +321,8 @@ export default function BusinessStockOutView({
   const openModal = () => {
     setEditTransaction(null);
     setForm({ ...defaultForm, reference_number: generateRef() });
+    setProductSearch('');
+    setShowProductOptions(false);
     setShowModal(true);
   };
 
@@ -292,8 +339,11 @@ export default function BusinessStockOutView({
       discount_amount: String(transaction.discount_amount || 0),
       cashier_name: transaction.cashier_name || '',
       payment_method: displayPaymentMethod(transaction.payment_method || 'Cash'),
+      customer_name: transaction.customer_name || '',
       reason: transaction.reason || '',
     });
+    setProductSearch(activeTab === 'adjustments' ? product?.name || transaction.detail?.split(' x')[0] || '' : '');
+    setShowProductOptions(false);
     setShowModal(true);
   };
 
@@ -315,8 +365,16 @@ export default function BusinessStockOutView({
 
   const handleProductSelect = (productId: string) => {
     const product = products.find((p) => p.id === productId);
-    setForm({ ...form, product_id: productId, product_name: product?.name || '' });
+    setForm((current) => ({ ...current, product_id: productId, product_name: product?.name || '' }));
+    if (activeTab === 'adjustments') {
+      setProductSearch(product?.name || '');
+      setShowProductOptions(false);
+    }
   };
+
+  const filteredProducts = products.filter((product) =>
+    product.name.toLowerCase().includes(productSearch.toLowerCase())
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -355,6 +413,7 @@ export default function BusinessStockOutView({
         quantity: qty,
         cashier_name: form.cashier_name,
         payment_method: form.payment_method,
+        ...(activeTab === 'sales' ? { customer_name: form.customer_name.trim() } : {}),
         detail: form.product_name ? `${form.product_name} x${qty}` : form.notes,
         reason: form.reason,
       };
@@ -393,6 +452,7 @@ export default function BusinessStockOutView({
           reference_number: referenceNumber,
           payment_method: form.payment_method,
           cashier_name: form.cashier_name,
+          customer_name: form.customer_name.trim(),
           notes: form.notes,
         };
         const { error: saleErr } = editTransaction
@@ -462,7 +522,21 @@ export default function BusinessStockOutView({
         render: (t) => <span className="text-muted-foreground text-xs">{t.reason || '—'}</span>,
       });
     } else {
-      cols.push({ key: 'payment', header: 'Payment', render: (t) => <span className="text-muted-foreground">{displayPaymentMethod(t.payment_method || '—')}</span> });
+      cols.push({ key: 'customer_name', header: 'Customer', render: (t) => <span className="text-muted-foreground">{t.customer_name || '—'}</span> });
+      cols.push({
+        key: 'payment',
+        header: 'Payment',
+        render: (t) => (
+          <div className="flex flex-col items-start gap-1">
+            <span className="text-muted-foreground">{displayPaymentMethod(t.payment_method || '—')}</span>
+            {t.payment_method === 'Credit' && t.payment_receipt_numbers?.map((receiptNumber, index) => (
+              <span key={`${receiptNumber}-${index}`} className="text-xs font-600 text-success">
+                Receipt No: {receiptNumber}
+              </span>
+            ))}
+          </div>
+        ),
+      });
     }
     cols.push({
       key: 'date',
@@ -541,7 +615,7 @@ export default function BusinessStockOutView({
                   <option value="">All methods</option>
                   <option>Cash</option>
                   <option>Transfers</option>
-                  <option>Invoice</option>
+                  <option>Credit</option>
                   <option>Mobile</option>
                 </select>
               </label>
@@ -574,7 +648,7 @@ export default function BusinessStockOutView({
           <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md mx-4">
             <div className="px-6 py-4 border-b border-border flex items-center justify-between">
               <h2 className="font-700 text-foreground">{editTransaction ? 'Edit Record' : activeTab === 'sales' ? 'New Sale' : 'Adjust'}</h2>
-              <button onClick={() => { setShowModal(false); setError(null); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+              <button onClick={() => { setShowModal(false); setShowProductOptions(false); setError(null); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
                 <X size={16} className="text-muted-foreground" />
               </button>
             </div>
@@ -588,13 +662,59 @@ export default function BusinessStockOutView({
               )}
               <div>
                 <label className="block text-xs font-600 text-muted-foreground mb-1">Product *</label>
-                <select required value={form.product_id} onChange={(e) => handleProductSelect(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30">
-                  <option value="">Select product...</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} (Stock: {p.current_stock})</option>
-                  ))}
-                </select>
+                {activeTab === 'adjustments' ? (
+                  <div className="relative">
+                    <div className="relative">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        value={productSearch}
+                        onFocus={() => setShowProductOptions(true)}
+                        onChange={(e) => {
+                          setProductSearch(e.target.value);
+                          setForm((current) => ({ ...current, product_id: '', product_name: '' }));
+                          setShowProductOptions(true);
+                        }}
+                        placeholder="Search or select a product..."
+                        className="w-full pl-8 pr-9 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductSearch('');
+                          setShowProductOptions(true);
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+                        aria-label="Show all products"
+                      >
+                        <ChevronDown size={16} />
+                      </button>
+                    </div>
+                    {showProductOptions && (
+                      <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 shadow-lg">
+                        {filteredProducts.length > 0 ? filteredProducts.map((product) => (
+                          <button
+                            key={product.id}
+                            type="button"
+                            onClick={() => handleProductSelect(product.id)}
+                            className={`block w-full px-3 py-2 text-left text-sm hover:bg-muted ${form.product_id === product.id ? 'bg-muted font-600 text-primary' : 'text-foreground'}`}
+                          >
+                            {product.name}
+                          </button>
+                        )) : (
+                          <p className="px-3 py-2 text-sm text-muted-foreground">No products found.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <select required value={form.product_id} onChange={(e) => handleProductSelect(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30">
+                    <option value="">Select product...</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name} (Stock: {p.current_stock})</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {activeTab === 'adjustments' ? (
@@ -647,16 +767,21 @@ export default function BusinessStockOutView({
                       <label className="block text-xs font-600 text-muted-foreground mb-1">Payment Method</label>
                       <select value={form.payment_method} onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
                         className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30">
-                        <option>Cash</option><option>Transfers</option><option>Invoice</option><option>Mobile</option>
+                        <option>Cash</option><option>Transfers</option><option>Credit</option><option>Mobile</option>
                       </select>
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-600 text-muted-foreground mb-1">Customer Name</label>
+                    <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
+                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" />
                   </div>
                 </>
               )}
 
               {error && <p className="text-xs text-danger">{error}</p>}
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowModal(false); setError(null); }}
+                <button type="button" onClick={() => { setShowModal(false); setShowProductOptions(false); setError(null); }}
                   className="flex-1 px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors">Cancel</button>
                 <button type="submit" disabled={submitting}
                   className={`flex-1 px-4 py-2 text-sm text-white rounded-lg hover:opacity-90 transition-colors font-medium disabled:opacity-60 ${typeConfig.bg}`}>

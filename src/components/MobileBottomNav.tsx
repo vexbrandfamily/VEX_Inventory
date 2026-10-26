@@ -3,10 +3,11 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Package, Layers, ArrowDownToLine, ArrowUpFromLine, ShoppingCart, ShoppingBag, Settings, X, TrendingDown, Boxes, PackageCheck, PackageMinus, BarChart3, LayoutDashboard, Users, CreditCard, BarChart2, MessageSquare } from 'lucide-react';
+import { Home, Package, Layers, ArrowDownToLine, ArrowUpFromLine, ShoppingCart, ShoppingBag, Settings, X, TrendingDown, Boxes, PackageCheck, PackageMinus, BarChart3, LayoutDashboard, Users, CreditCard, BarChart2, MessageSquare, WalletCards, HandCoins, BadgeDollarSign } from 'lucide-react';
 
 interface MobileBottomNavProps {
   accountType: 'store' | 'business' | 'admin';
+  isPosUser?: boolean;
 }
 
 /* ─── Store Classifications ─── */
@@ -43,7 +44,7 @@ const businessClassifications = [
   { id: 'sales', label: 'Sales', icon: ShoppingCart },
   { id: 'home', label: 'Home', icon: Home, href: '/business-home' },
   { id: 'movements', label: 'Adjustments', icon: ArrowDownToLine },
-  { id: 'system', label: 'System', icon: Settings },
+  { id: 'accounts', label: 'Accounts', icon: WalletCards },
 ];
 
 const businessClassificationItems: Record<string, { label: string; icon: React.ElementType; href: string }[]> = {
@@ -56,6 +57,10 @@ const businessClassificationItems: Record<string, { label: string; icon: React.E
     { label: 'Point of Sale', icon: ShoppingCart, href: '/business-pos' },
     { label: 'Sales', icon: TrendingDown, href: '/business-sales' },
   ],
+  accounts: [
+    { label: 'Debts', icon: HandCoins, href: '/business-debts' },
+    { label: 'Credits', icon: BadgeDollarSign, href: '/business-credits' },
+  ],
   movements: [
     { label: 'Adjustments In', icon: ArrowDownToLine, href: '/business-adjustments-in' },
     { label: 'Adjustments Out', icon: ArrowUpFromLine, href: '/business-adjustments-out' },
@@ -64,6 +69,12 @@ const businessClassificationItems: Record<string, { label: string; icon: React.E
     { label: 'Settings', icon: Settings, href: '/business-settings' },
   ],
 };
+
+const posClassifications = [
+  { id: 'pos', label: 'POS', icon: ShoppingCart, href: '/business-pos' },
+  { id: 'sales', label: 'Sales', icon: TrendingDown, href: '/business-sales' },
+  { id: 'credits', label: 'Credits', icon: BadgeDollarSign, href: '/business-credits' },
+];
 
 /* ─── Admin Classifications ─── */
 const adminClassifications = [
@@ -89,6 +100,30 @@ const adminClassificationItems: Record<string, { label: string; icon: React.Elem
     { label: 'Settings', icon: Settings, href: '/admin-settings' },
   ],
 };
+
+export const mobileClassificationEvent = 'vex:open-mobile-classification';
+
+export function getMobileClassificationForPath(
+  accountType: 'store' | 'business' | 'admin',
+  pathname: string,
+  isPosUser = false,
+): string | null {
+  if (accountType === 'business' && isPosUser) {
+    return posClassifications.find((item) => pathname.startsWith(item.href))?.id ?? null;
+  }
+  const classificationItems =
+    accountType === 'store'
+      ? storeClassificationItems
+      : accountType === 'business'
+      ? businessClassificationItems
+      : adminClassificationItems;
+
+  return (
+    Object.entries(classificationItems).find(([, items]) =>
+      items.some((item) => pathname === item.href.split('?')[0]),
+    )?.[0] ?? null
+  );
+}
 
 /* ─── Movement sub-items ─── */
 const movementsDetail = {
@@ -150,20 +185,51 @@ const classificationBg: Record<string, string> = {
   dashboard: 'bg-primary/10',
 };
 
-export default function MobileBottomNav({ accountType }: MobileBottomNavProps) {
+export default function MobileBottomNav({ accountType, isPosUser = false }: MobileBottomNavProps) {
   const [activeClassification, setActiveClassification] = useState<string | null>(null);
   const pathname = usePathname();
   const router = useRouter();
 
+  React.useEffect(() => {
+    const syncClassificationFromUrl = () => {
+      const classification = new URLSearchParams(window.location.search).get('classification');
+      setActiveClassification(classification);
+    };
+    const openClassification = (event: Event) => {
+      if (event instanceof CustomEvent && typeof event.detail === 'string') {
+        setActiveClassification(event.detail);
+      }
+    };
+
+    syncClassificationFromUrl();
+    window.addEventListener('popstate', syncClassificationFromUrl);
+    window.addEventListener(mobileClassificationEvent, openClassification);
+    return () => {
+      window.removeEventListener('popstate', syncClassificationFromUrl);
+      window.removeEventListener(mobileClassificationEvent, openClassification);
+    };
+  }, []);
+
+  const closeClassification = () => {
+    setActiveClassification(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('classification');
+    router.replace(`${pathname}${url.search}`);
+  };
+
   const classifications =
-    accountType === 'store'
+    accountType === 'business' && isPosUser
+      ? posClassifications
+      : accountType === 'store'
       ? storeClassifications
       : accountType === 'business'
       ? businessClassifications
       : adminClassifications;
 
   const classificationItems =
-    accountType === 'store'
+    accountType === 'business' && isPosUser
+      ? {}
+      : accountType === 'store'
       ? storeClassificationItems
       : accountType === 'business'
       ? businessClassificationItems
@@ -177,14 +243,15 @@ export default function MobileBottomNav({ accountType }: MobileBottomNavProps) {
       router.push(href);
       return;
     }
-    // If classification has only one module, navigate directly
-    const items = classificationItems[id] ?? [];
-    if (items.length === 1) {
-      setActiveClassification(null);
-      router.push(items[0].href);
+    if (id === activeClassification) {
+      closeClassification();
       return;
     }
-    setActiveClassification(id === activeClassification ? null : id);
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('classification', id);
+    setActiveClassification(id);
+    router.push(`${pathname}${url.search}`);
   };
 
   const isClassificationActive = (id: string, href?: string) => {
@@ -225,7 +292,9 @@ export default function MobileBottomNav({ accountType }: MobileBottomNavProps) {
               })()}
             </div>
             <button
-              onClick={() => setActiveClassification(null)}
+              type="button"
+              aria-label="Close classification"
+              onClick={closeClassification}
               className="w-8 h-8 flex items-center justify-center rounded-full bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
               <X size={18} />

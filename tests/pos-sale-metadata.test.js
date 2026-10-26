@@ -8,6 +8,7 @@ const record = buildPosSaleRecord({
   itemCount: 2,
   discountAmount: 5,
   paymentMethod: 'Transfers',
+  customerName: '  Alex Morgan  ',
   detail: 'Widget x2',
 });
 
@@ -18,6 +19,7 @@ assert.strictEqual(record.reference_number, 'POS-123456');
 assert.strictEqual(record.total_amount, 45.5);
 assert.strictEqual(record.discount_amount, 5);
 assert.strictEqual(record.payment_method, 'Transfers');
+assert.strictEqual(record.customer_name, 'Alex Morgan');
 assert.strictEqual(record.cashier_name, undefined);
 assert.strictEqual(record.detail, 'Widget x2');
 

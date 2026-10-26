@@ -22,6 +22,9 @@ interface Transaction {
   movement_subtype: string;
   total_amount: number;
   purchase_price?: number;
+  payment_method?: string;
+  purchase_reference_number?: string;
+  payment_receipt_numbers?: string[];
   item_count: number;
   cashier_name: string;
   detail: string;
@@ -47,6 +50,8 @@ interface TxForm {
   product_name: string;
   quantity: string;
   purchase_price: string;
+  payment_method: string;
+  purchase_reference_number: string;
   purchase_date: string;
   supplier: string;
   notes: string;
@@ -55,7 +60,7 @@ interface TxForm {
 
 const defaultForm: TxForm = {
   product_id: '', product_name: '', quantity: '1',
-  purchase_price: '', purchase_date: new Date().toISOString().split('T')[0], supplier: '', notes: '', reason: '',
+  purchase_price: '', payment_method: 'Cash', purchase_reference_number: '', purchase_date: new Date().toISOString().split('T')[0], supplier: '', notes: '', reason: '',
 };
 
 const tabConfig: Record<ActiveTab, { subtype: StockInSubtype; label: string; icon: React.ElementType; color: string; bg: string; description: string }> = {
@@ -144,16 +149,38 @@ export default function BusinessStockInView({
         for (let offset = 0; offset < transactionIds.length; offset += 500) {
           const purchaseQuery = supabase
             .from('business_purchases')
-            .select('transaction_id, purchase_price, unit_price')
+            .select('transaction_id, purchase_price, unit_price, payment_method, reference_number')
             .in('transaction_id', transactionIds.slice(offset, offset + 500));
           purchasePrices.push(...await fetchAllRows((from, to) => purchaseQuery.range(from, to)));
         }
         const pricesByTransaction = new Map(purchasePrices.map((purchase) => [purchase.transaction_id, purchase]));
+        const payments = currentAccountId
+          ? await fetchAllRows((from, to) => supabase
+              .from('business_credit_payments')
+              .select('transaction_id, amount, reference_number')
+              .eq('account_id', currentAccountId)
+              .in('transaction_id', transactionIds)
+              .range(from, to))
+          : [];
+        const paymentsByTransaction = new Map<string, { totalPaidCents: number; receiptNumbers: string[] }>();
+        for (const payment of payments) {
+          const current = paymentsByTransaction.get(payment.transaction_id) || { totalPaidCents: 0, receiptNumbers: [] };
+          current.totalPaidCents += Math.round(Number(payment.amount || 0) * 100);
+          if (payment.reference_number) current.receiptNumbers.push(payment.reference_number);
+          paymentsByTransaction.set(payment.transaction_id, current);
+        }
         setTransactions(data.map((transaction) => {
           const purchase = pricesByTransaction.get(transaction.id);
+          const paymentSummary = paymentsByTransaction.get(transaction.id);
+          const totalAmountCents = Math.round(Number(transaction.total_amount || 0) * 100);
           return {
             ...transaction,
             purchase_price: Number(purchase?.purchase_price ?? purchase?.unit_price ?? 0),
+            payment_method: purchase?.payment_method ?? transaction.payment_method ?? 'Cash',
+            purchase_reference_number: purchase?.reference_number ?? '',
+            payment_receipt_numbers: paymentSummary && paymentSummary.totalPaidCents >= totalAmountCents
+              ? paymentSummary.receiptNumbers
+              : [],
           };
         }));
       } else {
@@ -211,6 +238,8 @@ export default function BusinessStockInView({
       product_name: product?.name || transaction.detail?.split(' x')[0] || '',
       quantity: String(transaction.quantity || transaction.item_count || 1),
       purchase_price: String(transaction.purchase_price ?? (transaction.total_amount || 0) / Math.max(1, transaction.quantity || transaction.item_count || 1)),
+      payment_method: transaction.payment_method || 'Cash',
+      purchase_reference_number: transaction.purchase_reference_number || '',
       purchase_date: transaction.purchase_date || defaultForm.purchase_date,
       supplier: transaction.supplier || '',
       notes: transaction.notes || '',
@@ -280,6 +309,7 @@ export default function BusinessStockInView({
         quantity: qty,
         purchase_date: purchaseDate,
         supplier: form.supplier,
+        ...(activeTab === 'purchases' ? { payment_method: form.payment_method } : {}),
         detail: form.product_name ? `${form.product_name} x${qty}` : form.notes,
         reason: form.reason,
         notes: form.notes,
@@ -318,6 +348,8 @@ export default function BusinessStockInView({
           total_amount: total,
           purchase_date: purchaseDate,
           supplier: form.supplier,
+          payment_method: form.payment_method,
+          reference_number: form.payment_method === 'Credit' ? form.purchase_reference_number.trim() : '',
           notes: form.notes,
         };
         const { error: purchaseErr } = editTransaction
@@ -390,6 +422,18 @@ export default function BusinessStockInView({
       });
     } else {
       cols.push({ key: 'supplier', header: 'Supplier', render: (t) => <span className="text-muted-foreground">{t.supplier || '—'}</span> });
+      cols.push({
+        key: 'payment_method',
+        header: 'Payment Method',
+        render: (t) => (
+          <div className="flex flex-col items-start gap-1">
+            <span className="text-muted-foreground">{t.payment_method || 'Cash'}</span>
+            {t.payment_method === 'Credit' && t.payment_receipt_numbers?.map((receiptNumber, index) => (
+              <span key={`${receiptNumber}-${index}`} className="text-xs font-600 text-success">{receiptNumber}</span>
+            ))}
+          </div>
+        ),
+      });
     }
     cols.push({
       key: 'date',
@@ -544,6 +588,24 @@ export default function BusinessStockInView({
                       <input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })}
                         className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" />
                     </div>
+                    <div>
+                      <label className="block text-xs font-600 text-muted-foreground mb-1">Payment Method</label>
+                      <select required value={form.payment_method} onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
+                        className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30">
+                        <option>Cash</option>
+                        <option>Transfers</option>
+                        <option>Credit</option>
+                        <option>Mobile</option>
+                      </select>
+                    </div>
+                    {form.payment_method === 'Credit' && (
+                      <div>
+                        <label className="block text-xs font-600 text-muted-foreground mb-1">Reference Number</label>
+                        <input value={form.purchase_reference_number} onChange={(e) => setForm({ ...form, purchase_reference_number: e.target.value })}
+                          placeholder="Enter credit reference number"
+                          className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30" />
+                      </div>
+                    )}
 
                     <div className="md:col-span-2">
                       <label className="block text-xs font-600 text-muted-foreground mb-1">Notes</label>

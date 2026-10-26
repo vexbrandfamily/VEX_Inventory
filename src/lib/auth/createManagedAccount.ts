@@ -1,8 +1,7 @@
-import { createClient as createAuthClient } from '@supabase/supabase-js';
-
-export type ManagedAccountInput = {
+type ManagedAccountInput = {
   name: string;
   email: string;
+  pos_email?: string | null;
   contacts: string;
   password: string;
   account_type: 'store' | 'business';
@@ -13,62 +12,46 @@ export type ManagedAccountInput = {
   logo_url?: string;
 };
 
+type CreatePosLoginInput = {
+  account_id: string;
+  main_email: string;
+  pos_email: string;
+  password: string;
+  full_name: string;
+  avatar_url?: string;
+};
+
+async function invokeAccountFunction(
+  adminClient: any,
+  body: ManagedAccountInput | ({ action: 'create_pos_login' } & CreatePosLoginInput)
+) {
+  const { data, error } = await adminClient.functions.invoke('create-user', { body });
+  if (error) {
+    const context = (error as { context?: Response }).context;
+    const responseBody = context
+      ? ((await context
+          .clone()
+          .json()
+          .catch(() => null)) as { error?: string } | null)
+      : null;
+    throw new Error(responseBody?.error || `Account creation failed: ${error.message}`);
+  }
+  if (data?.error) throw new Error(data.error);
+  if (!data?.success) throw new Error('Account creation failed without a success response.');
+  return data;
+}
+
 export async function createManagedAccount(adminClient: any, input: ManagedAccountInput) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    throw new Error('Supabase is not configured');
+  await invokeAccountFunction(adminClient, input);
+}
+
+export async function createPosManagedUser(
+  adminClient: any,
+  input: CreatePosLoginInput
+): Promise<string> {
+  const data = await invokeAccountFunction(adminClient, { ...input, action: 'create_pos_login' });
+  if (typeof data.pos_user_id !== 'string') {
+    throw new Error('POS login was created without a linked Auth user.');
   }
-
-  const isolated = createAuthClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
-
-  const { data: signUpData, error: signUpError } = await isolated.auth.signUp({
-    email: input.email,
-    password: input.password,
-    options: {
-      data: {
-        full_name: input.name,
-        account_type: input.account_type,
-        avatar_url: input.logo_url || '',
-      },
-    },
-  });
-
-  if (signUpError) throw new Error(signUpError.message);
-  const userId = signUpData.user?.id;
-  if (!userId) {
-    throw new Error(
-      'Login was created but needs email confirmation. Confirm the user in Supabase Auth, or disable Confirm email.'
-    );
-  }
-
-  const { error: profileError } = await adminClient.from('user_profiles').upsert(
-    {
-      id: userId,
-      email: input.email,
-      full_name: input.name,
-      account_type: input.account_type,
-      avatar_url: input.logo_url || '',
-      is_active: true,
-    },
-    { onConflict: 'id' }
-  );
-  if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`);
-
-  const { error: accountError } = await adminClient.from('accounts').insert({
-    user_id: userId,
-    name: input.name,
-    email: input.email,
-    contacts: input.contacts || '',
-    account_type: input.account_type,
-    country: input.country || '',
-    town: input.town.trim(),
-    country_code: input.country_code || '',
-    currency_code: input.currency_code || 'USD',
-    logo_url: input.logo_url || '',
-    status: 'active',
-  });
-  if (accountError) throw new Error(`Account creation failed: ${accountError.message}`);
+  return data.pos_user_id;
 }

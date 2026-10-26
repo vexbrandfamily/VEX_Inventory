@@ -10,7 +10,6 @@ import { formatMoney } from '@/lib/countries';
 interface BusinessMetrics {
   todaySales: number;
   todayTransactions: number;
-  todayReturns: number;
   mtdPurchases: number;
   lowStockProducts: number;
   outOfStock: number;
@@ -38,7 +37,7 @@ export default function BusinessMetricsBento() {
     );
   }
 
-  const m = metrics ?? { todaySales: 0, todayTransactions: 0, todayReturns: 0, mtdPurchases: 0, lowStockProducts: 0, outOfStock: 0 };
+  const m = metrics ?? { todaySales: 0, todayTransactions: 0, mtdPurchases: 0, lowStockProducts: 0, outOfStock: 0 };
   const fmtMoney = (n: number) => formatMoney(n, currencyCode);
 
   return (
@@ -60,7 +59,7 @@ export default function BusinessMetricsBento() {
         <MetricCard
           label="Transactions Today"
           value={m.todayTransactions.toString()}
-          subValue={`${m.todayTransactions - m.todayReturns} sales · ${m.todayReturns} returns`}
+          subValue={`${m.todayTransactions} sales today`}
           trend="up"
           trendValue={`+${m.todayTransactions}`}
           trendLabel="today"

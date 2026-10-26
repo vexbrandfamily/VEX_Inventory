@@ -1,14 +1,17 @@
 -- VEX Inventory database schema (single source of truth — do not add extra schema files).
 -- Apply this file in the Supabase SQL Editor before deploying the create-user Edge Function.
 -- Passwords are managed by Supabase Auth and are intentionally not stored here.
+-- Business POS users are separate Auth users linked to their business account by pos_user_id.
 
 create extension if not exists pgcrypto;
 
 create table if not exists public.accounts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid unique references auth.users(id) on delete set null,
+  pos_user_id uuid references auth.users(id) on delete set null,
   name text not null check (char_length(trim(name)) > 0),
   email text not null,
+  pos_email text,
   contacts text not null default '',
   account_type text not null check (account_type in ('store', 'business')),
   country text not null default '',
@@ -16,6 +19,11 @@ create table if not exists public.accounts (
   country_code text not null default '',
   currency_code text not null default 'USD' check (currency_code ~ '^[A-Z]{3}$'),
   logo_url text not null default '',
+  plan text,
+  registered_date date,
+  subscription_status text,
+  subscription_expiry date,
+  monthly_amount numeric(12,2) not null default 0,
   status text not null default 'active' check (status in ('active', 'suspended'))
 );
 
@@ -27,7 +35,30 @@ alter table public.accounts
   add column if not exists contacts text not null default '';
 
 alter table public.accounts
+  add column if not exists pos_email text;
+
+alter table public.accounts
+  add column if not exists pos_user_id uuid references auth.users(id) on delete set null;
+
+alter table public.accounts
   add column if not exists town text not null default '';
+
+-- Keep legacy account creation functions compatible until they are redeployed.
+alter table public.accounts
+  add column if not exists plan text;
+
+alter table public.accounts
+  add column if not exists registered_date date;
+
+alter table public.accounts
+  add column if not exists subscription_status text;
+
+alter table public.accounts
+  add column if not exists subscription_expiry date;
+
+-- Existing databases created before monthly_amount was dropped, then re-added for create-user compatibility.
+alter table public.accounts
+  add column if not exists monthly_amount numeric(12,2) not null default 0;
 
 alter table public.accounts drop constraint if exists accounts_status_check;
 alter table public.accounts
@@ -39,11 +70,6 @@ where status is null or status not in ('active', 'suspended');
 
 -- Remove legacy account fields when this script is applied to an older schema.
 alter table public.accounts
-  drop column if exists plan,
-  drop column if exists subscription_status,
-  drop column if exists monthly_amount,
-  drop column if exists subscription_expiry,
-  drop column if exists registered_date,
   drop column if exists created_at,
   drop column if exists updated_at;
 
@@ -51,6 +77,12 @@ drop trigger if exists accounts_set_updated_at on public.accounts;
 
 create unique index if not exists accounts_email_lower_key
   on public.accounts (lower(email));
+create unique index if not exists accounts_pos_email_lower_key
+  on public.accounts (lower(pos_email))
+  where pos_email is not null;
+create unique index if not exists accounts_pos_user_id_key
+  on public.accounts (pos_user_id)
+  where pos_user_id is not null;
 create index if not exists accounts_account_type_idx on public.accounts (account_type);
 
 create table if not exists public.user_profiles (
@@ -232,6 +264,8 @@ create table if not exists public.business_purchases (
   purchase_price numeric(12,2) not null default 0 check (purchase_price >= 0),
   purchase_date date,
   supplier text not null default '',
+  payment_method text not null default 'Cash',
+  reference_number text not null default '',
   notes text not null default '',
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -250,6 +284,7 @@ create table if not exists public.business_sales (
   reference_number text not null default '',
   payment_method text not null default 'Cash',
   cashier_name text not null default '',
+  customer_name text not null default '',
   notes text not null default '',
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -271,10 +306,21 @@ create table if not exists public.business_transactions (
   supplier text not null default '',
   cashier_name text not null default '',
   payment_method text not null default 'Cash',
+  customer_name text not null default '',
   reason text not null default '',
   notes text not null default '',
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.business_credit_payments (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.accounts(id) on delete cascade,
+  transaction_id uuid not null references public.business_transactions(id) on delete cascade,
+  amount numeric(12,2) not null check (amount > 0),
+  payment_method text not null check (payment_method in ('Cash', 'Transfers', 'Mobile')),
+  reference_number text not null unique,
+  created_at timestamptz not null default timezone('utc', now())
 );
 
 create table if not exists public.business_adjustment_in (
@@ -308,6 +354,10 @@ create table if not exists public.business_adjustment_out (
 alter table public.business_purchases
   add column if not exists transaction_id uuid;
 alter table public.business_purchases
+  add column if not exists payment_method text not null default 'Cash';
+alter table public.business_purchases
+  add column if not exists reference_number text not null default '';
+alter table public.business_purchases
   add column if not exists purchase_price numeric(12,2) not null default 0,
   drop column if exists selling_price;
 alter table public.business_products
@@ -316,6 +366,8 @@ alter table public.business_sales
   add column if not exists transaction_id uuid;
 alter table public.business_sales
   add column if not exists discount_amount numeric(12,2) not null default 0;
+alter table public.business_sales
+  add column if not exists customer_name text not null default '';
 alter table public.business_adjustment_in
   add column if not exists transaction_id uuid;
 alter table public.business_adjustment_out
@@ -324,6 +376,8 @@ alter table public.business_transactions
   add column if not exists product_id uuid;
 alter table public.business_transactions
   add column if not exists discount_amount numeric(12,2) not null default 0;
+alter table public.business_transactions
+  add column if not exists customer_name text not null default '';
 
 do $$
 begin
@@ -362,6 +416,10 @@ create index if not exists business_purchases_account_id_idx
   on public.business_purchases (account_id);
 create index if not exists business_purchases_created_at_idx
   on public.business_purchases (created_at desc);
+create index if not exists business_credit_payments_account_id_idx
+  on public.business_credit_payments (account_id);
+create index if not exists business_credit_payments_transaction_id_idx
+  on public.business_credit_payments (transaction_id);
 create index if not exists business_sales_account_id_idx
   on public.business_sales (account_id);
 create index if not exists business_sales_created_at_idx
@@ -501,11 +559,27 @@ as $$
   select auth.uid() is not null
     and (
       coalesce(auth.jwt() -> 'app_metadata' ->> 'account_type', '') = 'admin'
-      or coalesce(auth.jwt() -> 'user_metadata' ->> 'account_type', '') = 'admin'
-      or not exists (
-        select 1 from public.accounts
-        where user_id = auth.uid()
-          and account_type in ('store', 'business')
+      or (
+        coalesce(auth.jwt() -> 'user_metadata' ->> 'account_type', '') = 'admin'
+        and not exists (
+          select 1 from public.accounts
+          where user_id = auth.uid() or pos_user_id = auth.uid()
+        )
+        and not exists (
+          select 1 from public.user_profiles
+          where id = auth.uid() and account_type in ('store', 'business')
+        )
+      )
+      or (
+        not exists (
+          select 1 from public.accounts
+          where (user_id = auth.uid() or pos_user_id = auth.uid())
+            and account_type in ('store', 'business')
+        )
+        and not exists (
+          select 1 from public.user_profiles
+          where id = auth.uid() and account_type in ('store', 'business')
+        )
       )
     );
 $$;
@@ -574,6 +648,7 @@ alter table public.business_sales enable row level security;
 alter table public.business_transactions enable row level security;
 alter table public.business_adjustment_in enable row level security;
 alter table public.business_adjustment_out enable row level security;
+alter table public.business_credit_payments enable row level security;
 alter table public.platform_activities enable row level security;
 alter table public.sms_messages enable row level security;
 alter table public.subscriptions enable row level security;
@@ -582,7 +657,7 @@ alter table public.subscriptions enable row level security;
 drop policy if exists accounts_admin_select on public.accounts;
 create policy accounts_admin_select on public.accounts
 for select to authenticated
-using (public.is_platform_admin() or user_id = auth.uid());
+using (public.is_platform_admin() or user_id = auth.uid() or pos_user_id = auth.uid());
 
 drop policy if exists accounts_admin_insert on public.accounts;
 create policy accounts_admin_insert on public.accounts
@@ -678,12 +753,20 @@ for all to authenticated
 using (
   account_id in (
     select id from public.accounts where user_id = auth.uid() and account_type = 'business'
-  ) or public.is_platform_admin()
+  )
+  or account_id in (
+    select id from public.accounts where pos_user_id = auth.uid() and account_type = 'business'
+  )
+  or public.is_platform_admin()
 )
 with check (
   account_id in (
     select id from public.accounts where user_id = auth.uid() and account_type = 'business'
-  ) or public.is_platform_admin()
+  )
+  or account_id in (
+    select id from public.accounts where pos_user_id = auth.uid() and account_type = 'business'
+  )
+  or public.is_platform_admin()
 );
 
 drop policy if exists business_purchases_account_access on public.business_purchases;
@@ -706,12 +789,20 @@ for all to authenticated
 using (
   account_id in (
     select id from public.accounts where user_id = auth.uid() and account_type = 'business'
-  ) or public.is_platform_admin()
+  )
+  or account_id in (
+    select id from public.accounts where pos_user_id = auth.uid() and account_type = 'business'
+  )
+  or public.is_platform_admin()
 )
 with check (
   account_id in (
     select id from public.accounts where user_id = auth.uid() and account_type = 'business'
-  ) or public.is_platform_admin()
+  )
+  or account_id in (
+    select id from public.accounts where pos_user_id = auth.uid() and account_type = 'business'
+  )
+  or public.is_platform_admin()
 );
 
 drop policy if exists business_transactions_account_access on public.business_transactions;
@@ -720,12 +811,42 @@ for all to authenticated
 using (
   account_id in (
     select id from public.accounts where user_id = auth.uid() and account_type = 'business'
-  ) or public.is_platform_admin()
+  )
+  or account_id in (
+    select id from public.accounts where pos_user_id = auth.uid() and account_type = 'business'
+  )
+  or public.is_platform_admin()
 )
 with check (
   account_id in (
     select id from public.accounts where user_id = auth.uid() and account_type = 'business'
-  ) or public.is_platform_admin()
+  )
+  or account_id in (
+    select id from public.accounts where pos_user_id = auth.uid() and account_type = 'business'
+  )
+  or public.is_platform_admin()
+);
+
+drop policy if exists business_credit_payments_account_access on public.business_credit_payments;
+create policy business_credit_payments_account_access on public.business_credit_payments
+for all to authenticated
+using (
+  account_id in (
+    select id from public.accounts where user_id = auth.uid() and account_type = 'business'
+  )
+  or account_id in (
+    select id from public.accounts where pos_user_id = auth.uid() and account_type = 'business'
+  )
+  or public.is_platform_admin()
+)
+with check (
+  account_id in (
+    select id from public.accounts where user_id = auth.uid() and account_type = 'business'
+  )
+  or account_id in (
+    select id from public.accounts where pos_user_id = auth.uid() and account_type = 'business'
+  )
+  or public.is_platform_admin()
 );
 
 drop policy if exists business_adjustment_in_account_access on public.business_adjustment_in;
@@ -824,6 +945,7 @@ grant select, insert, update, delete on public.store_adjustment_out to authentic
 grant select, insert, update, delete on public.business_purchases to authenticated;
 grant select, insert, update, delete on public.business_sales to authenticated;
 grant select, insert, update, delete on public.business_transactions to authenticated;
+grant select, insert, update, delete on public.business_credit_payments to authenticated;
 grant select, insert, update, delete on public.business_adjustment_in to authenticated;
 grant select, insert, update, delete on public.business_adjustment_out to authenticated;
 grant select, insert, update, delete on public.sms_messages to authenticated;

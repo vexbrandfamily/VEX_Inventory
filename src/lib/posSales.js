@@ -9,6 +9,7 @@ function buildPosSaleRecord({
   itemCount = 0,
   discountAmount = 0,
   paymentMethod = 'Cash',
+  customerName = '',
   detail = '',
 }) {
   return {
@@ -21,6 +22,7 @@ function buildPosSaleRecord({
     quantity: Number(itemCount) || 0,
     discount_amount: Number(discountAmount) || 0,
     payment_method: paymentMethod || 'Cash',
+    customer_name: String(customerName || '').trim(),
     detail: detail || '',
     payment_status: 'Paid',
   };

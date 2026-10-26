@@ -40,11 +40,11 @@ export default function MetricCard({
   const styles = variantMap[variant];
 
   return (
-    <div className={`rounded-xl border p-4 ${styles.card} ${className}`}>
+    <div className={`min-w-0 rounded-xl border p-4 ${styles.card} ${className}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className={`text-xs font-600 uppercase tracking-wider mb-2 ${styles.label}`}>{label}</p>
-          <p className="text-3xl font-800 text-foreground hero-metric leading-none">{value}</p>
+          <p className="text-3xl font-800 text-foreground hero-metric leading-none [overflow-wrap:anywhere]">{value}</p>
           {subValue && <p className="text-sm text-muted-foreground mt-1">{subValue}</p>}
         </div>
         {Icon && (

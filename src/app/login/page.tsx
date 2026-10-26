@@ -10,6 +10,7 @@ import {
   ACCOUNT_SUSPENDED_MESSAGE,
   ACCOUNT_SUSPENDED_QUERY,
   homeForAccountType,
+  isPosAccount,
   resolveAccountType,
 } from '@/lib/auth/resolveAccountType';
 
@@ -40,7 +41,8 @@ export default function LoginPage() {
       if (userId) {
         const supabase = createClient();
         const accountType = await resolveAccountType(supabase, data.user);
-        router.push(homeForAccountType(accountType));
+        const isPosUser = await isPosAccount(supabase, data.user);
+        router.push(isPosUser ? '/business-pos' : homeForAccountType(accountType));
       } else {
         router.push('/');
       }
@@ -61,7 +63,9 @@ export default function LoginPage() {
         <div className="bg-card border border-white/15 rounded-2xl p-6 shadow-2xl shadow-black/40">
           <div className="mb-5">
             <h2 className="text-lg font-700 text-foreground">Sign in to your account</h2>
-            <p className="text-sm text-muted-foreground mt-1">Enter your credentials to access the platform</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Enter your credentials to access the platform
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -118,7 +122,6 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
-
         </div>
       </div>
     </div>

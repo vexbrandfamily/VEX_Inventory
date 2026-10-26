@@ -21,6 +21,7 @@ export interface UserProfile {
   avatar_url?: string;
   account_type: AccountType;
   is_active?: boolean;
+  is_pos_user?: boolean;
 }
 
 interface AuthContextValue {
@@ -66,15 +67,33 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let logoUrl = data?.avatar_url || authUser?.user_metadata?.avatar_url || '';
 
     if (email) {
-      const { data: account } = await supabase
+      let { data: account } = await supabase
         .from('accounts')
         .select('name, logo_url, account_type')
-        .eq('email', email)
+        .eq('user_id', userId)
         .maybeSingle();
+      if (!account) {
+        const { data: accountByEmail } = await supabase
+          .from('accounts')
+          .select('name, logo_url, account_type')
+          .eq('email', email)
+          .maybeSingle();
+        account = accountByEmail;
+      }
       if (account) {
         accountName = account.name || accountName;
         logoUrl = account.logo_url || logoUrl;
       }
+    }
+    const { data: posAccount, error: posAccountError } = await supabase
+      .from('accounts')
+      .select('id, name, logo_url')
+      .eq('pos_user_id', userId)
+      .maybeSingle();
+    if (posAccountError) throw new Error(`Could not verify POS account: ${posAccountError.message}`);
+    if (posAccount) {
+      accountName = posAccount.name || accountName;
+      logoUrl = posAccount.logo_url || logoUrl;
     }
 
     const nextProfile: UserProfile = {
@@ -84,6 +103,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       avatar_url: logoUrl || '',
       account_type: accountType,
       is_active: data?.is_active ?? true,
+      is_pos_user: !!posAccount,
     };
 
     if (accountType === 'admin' && data?.account_type !== 'admin') {

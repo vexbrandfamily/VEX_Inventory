@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Bell, ChevronDown, LogOut } from 'lucide-react';
+import { ArrowLeft, Bell, ChevronDown, LogOut, Settings } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import AccountAvatar from '@/components/AccountAvatar';
@@ -9,6 +9,7 @@ import { useStableAccountIdentity } from '@/hooks/useStableAccountIdentity';
 import { fetchAllRows } from '@/lib/supabase/fetchAllRows';
 import { createClient } from '@/lib/supabase/client';
 import { getNotificationReadStateEvent, getReadNotificationIds, notificationReadStorageKey } from '@/lib/notificationReadState';
+import { mobileClassificationEvent } from '@/components/MobileBottomNav';
 
 interface TopbarProps {
   title: string;
@@ -16,6 +17,7 @@ interface TopbarProps {
   accountType: 'admin' | 'store' | 'business';
   isHomePage: boolean;
   onBack?: () => void;
+  mobileBackClassification?: string;
 }
 
 const accountColors = {
@@ -36,7 +38,14 @@ const accountRoleLabels = {
   business: 'Business Account',
 };
 
-export default function Topbar({ title, subtitle, accountType, isHomePage, onBack }: TopbarProps) {
+export default function Topbar({
+  title,
+  subtitle,
+  accountType,
+  isHomePage,
+  onBack,
+  mobileBackClassification,
+}: TopbarProps) {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const { profile, user, signOut } = useAuth();
@@ -127,6 +136,18 @@ export default function Topbar({ title, subtitle, accountType, isHomePage, onBac
     }
   };
 
+  const handleMobileBack = () => {
+    if (mobileBackClassification) {
+      const searchParams = new URLSearchParams(window.location.search);
+      searchParams.set('classification', mobileBackClassification);
+      router.push(`${window.location.pathname}?${searchParams.toString()}`);
+      window.dispatchEvent(new CustomEvent(mobileClassificationEvent, { detail: mobileBackClassification }));
+      return;
+    }
+
+    router.back();
+  };
+
   return (
     <header className="h-14 bg-card/90 backdrop-blur-xl border-b border-border flex items-center px-4 lg:px-6 gap-4 sticky top-0 z-30">
       {onBack ? (
@@ -144,7 +165,7 @@ export default function Topbar({ title, subtitle, accountType, isHomePage, onBac
             <button
               type="button"
               aria-label="Go back"
-              onClick={() => router.back()}
+              onClick={handleMobileBack}
               className="md:hidden w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg hover:bg-muted transition-colors"
             >
               <ArrowLeft size={20} className="text-muted-foreground" />
@@ -174,6 +195,17 @@ export default function Topbar({ title, subtitle, accountType, isHomePage, onBac
               >
                 <Bell size={16} className="text-muted-foreground" />
                 {hasUnreadNotifications && <span className="absolute top-1 right-1 w-2 h-2 bg-danger rounded-full" />}
+              </button>
+            )}
+            {accountType === 'business' && (
+              <button
+                type="button"
+                aria-label="Open system settings"
+                title="System settings"
+                onClick={() => router.push('/business-settings')}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted transition-colors"
+              >
+                <Settings size={16} className="text-muted-foreground" />
               </button>
             )}
             <div className="relative" ref={accountMenuRef}>

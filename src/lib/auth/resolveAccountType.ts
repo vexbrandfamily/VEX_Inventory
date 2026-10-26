@@ -1,11 +1,14 @@
 export type AccountType = 'admin' | 'store' | 'business';
 
-type AuthLikeUser = {
-  id?: string;
-  email?: string | null;
-  user_metadata?: Record<string, unknown> | null;
-  app_metadata?: Record<string, unknown> | null;
-} | null | undefined;
+type AuthLikeUser =
+  | {
+      id?: string;
+      email?: string | null;
+      user_metadata?: Record<string, unknown> | null;
+      app_metadata?: Record<string, unknown> | null;
+    }
+  | null
+  | undefined;
 
 /**
  * Store/Business only when Admin created the member in Accounts.
@@ -23,7 +26,19 @@ export async function resolveAccountType(supabase: any, user: AuthLikeUser): Pro
     if (account?.account_type === 'store' || account?.account_type === 'business') {
       return account.account_type;
     }
+
+    const { data: posAccount, error: posAccountError } = await supabase
+      .from('accounts')
+      .select('account_type')
+      .eq('pos_user_id', userId)
+      .maybeSingle();
+    if (posAccountError) {
+      throw new Error(`Could not verify POS account type: ${posAccountError.message}`);
+    }
+    if (posAccount?.account_type === 'business') return 'business';
   }
+
+  if (user?.user_metadata?.is_pos_user === true) return 'admin';
 
   const email = user?.email?.trim();
   if (email) {
@@ -39,12 +54,25 @@ export async function resolveAccountType(supabase: any, user: AuthLikeUser): Pro
     }
   }
 
-  const meta = (user?.user_metadata?.account_type || user?.app_metadata?.account_type) as string | undefined;
+  const meta = (user?.user_metadata?.account_type || user?.app_metadata?.account_type) as
+    | string
+    | undefined;
   if (meta === 'store' || meta === 'business') {
     return meta;
   }
 
   return 'admin';
+}
+
+export async function isPosAccount(supabase: any, user: AuthLikeUser): Promise<boolean> {
+  if (!user?.id) return false;
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('id')
+    .eq('pos_user_id', user.id)
+    .maybeSingle();
+  if (error) throw new Error(`Could not verify POS account: ${error.message}`);
+  return !!data;
 }
 
 export async function isAccountSuspended(supabase: any, user: AuthLikeUser): Promise<boolean> {
@@ -56,6 +84,21 @@ export async function isAccountSuspended(supabase: any, user: AuthLikeUser): Pro
       .eq('user_id', userId)
       .maybeSingle();
     if (account?.status === 'suspended') return true;
+    const { data: posAccount, error: posAccountError } = await supabase
+      .from('accounts')
+      .select('status')
+      .eq('pos_user_id', userId)
+      .maybeSingle();
+    if (posAccountError) {
+      throw new Error(`Could not verify POS account status: ${posAccountError.message}`);
+    }
+    if (posAccount?.status === 'suspended') return true;
+    if (
+      !posAccount &&
+      (user?.user_metadata?.is_pos_user === true || user?.app_metadata?.is_pos_user === true)
+    ) {
+      return true;
+    }
 
     const { data: profile } = await supabase
       .from('user_profiles')

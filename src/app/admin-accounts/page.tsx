@@ -20,13 +20,15 @@ import ResponsiveRecordList, { RecordColumn } from '@/components/ui/ResponsiveRe
 import AccountAvatar from '@/components/AccountAvatar';
 import StatusBadge from '@/components/ui/StatusBadge';
 import { getCountryByPhoneCode, getCurrencySymbol } from '@/lib/countries';
-import { createManagedAccount } from '@/lib/auth/createManagedAccount';
+import { createManagedAccount, createPosManagedUser } from '@/lib/auth/createManagedAccount';
 
 interface Account {
   id: string;
   user_id: string;
+  pos_user_id?: string | null;
   name: string;
   email: string;
+  pos_email?: string | null;
   contacts: string;
   account_type: 'store' | 'business';
   country: string;
@@ -40,6 +42,7 @@ interface Account {
 interface NewAccountForm {
   name: string;
   email: string;
+  pos_email: string;
   contacts: string;
   password: string;
   account_type: 'store' | 'business';
@@ -51,6 +54,7 @@ interface NewAccountForm {
 const emptyForm: NewAccountForm = {
   name: '',
   email: '',
+  pos_email: '',
   contacts: '',
   password: '',
   account_type: 'store',
@@ -79,18 +83,40 @@ export default function AdminAccountsPage() {
   const selectedCountry = getCountryByPhoneCode(form.country_code);
 
   const fetchAccounts = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+    const loadRows = async (includePosFields: boolean): Promise<Account[]> => {
+      if (includePosFields) {
+        const { error } = await supabase.from('accounts').select('pos_user_id, pos_email').limit(0);
+        if (error) throw error;
+      }
       let query = supabase
         .from('accounts')
         .select('*')
         .in('account_type', ['store', 'business'])
         .order('name', { ascending: true });
       if (filterType !== 'all') query = query.eq('account_type', filterType);
-      setAccounts(await fetchAllRows((from, to) => query.range(from, to)));
+      return fetchAllRows<Account>((from, to) => query.range(from, to));
+    };
+
+    setLoading(true);
+    setError(null);
+    try {
+      try {
+        setAccounts(await loadRows(true));
+      } catch (e: any) {
+        const message = e?.message || '';
+        const missingPosFields =
+          /pos_email|pos_user_id/i.test(message) &&
+          /column|schema cache|does not exist|could not find/i.test(message);
+        if (!missingPosFields) throw e;
+
+        const rows = await loadRows(false);
+        setAccounts(rows);
+        setError(
+          'POS account fields are missing from Supabase. Accounts are shown without POS emails until the updated supabase/schema.sql is applied.'
+        );
+      }
     } catch (e: any) {
-      setError(e.message);
+      setError(e?.message || 'Could not load accounts.');
     } finally {
       setLoading(false);
     }
@@ -102,7 +128,9 @@ export default function AdminAccountsPage() {
 
   const searchTerm = search.trim().toLowerCase();
   const filtered = accounts.filter((a) =>
-    [a.name, a.email, a.country, a.town].some((value) => value?.toLowerCase().includes(searchTerm))
+    [a.name, a.email, a.pos_email, a.country, a.town].some((value) =>
+      value?.toLowerCase().includes(searchTerm)
+    )
   );
 
   const handleCountryChange = (code: string) => {
@@ -121,6 +149,30 @@ export default function AdminAccountsPage() {
     try {
       if (!form.country_code) throw new Error('Please enter a country calling code');
       if (!selectedCountry) throw new Error(`No country found for +${form.country_code}`);
+      const posEmail = form.pos_email.trim().toLowerCase();
+      if (posEmail && posEmail === form.email.trim().toLowerCase()) {
+        throw new Error('POS email must be different from the main account email.');
+      }
+      if (
+        editingAccount &&
+        form.account_type === 'business' &&
+        editingAccount.pos_user_id &&
+        !posEmail
+      ) {
+        throw new Error('Enter the POS email for this account.');
+      }
+      if (
+        editingAccount &&
+        form.account_type === 'business' &&
+        !!posEmail &&
+        (!editingAccount.pos_user_id ||
+          posEmail !== (editingAccount.pos_email || '').toLowerCase()) &&
+        !form.password
+      ) {
+        throw new Error(
+          'Enter the current main account password to create or update its POS login.'
+        );
+      }
 
       const {
         data: { session },
@@ -167,11 +219,31 @@ export default function AdminAccountsPage() {
       }
 
       if (editingAccount) {
+        let posUserId =
+          form.account_type === 'business' ? editingAccount.pos_user_id || null : null;
+        if (
+          form.account_type === 'business' &&
+          !!posEmail &&
+          (!posUserId ||
+            posEmail !== (editingAccount.pos_email || '').toLowerCase() ||
+            form.password)
+        ) {
+          posUserId = await createPosManagedUser(supabase, {
+            account_id: editingAccount.id,
+            main_email: editingAccount.email,
+            pos_email: posEmail,
+            password: form.password,
+            full_name: form.name,
+            avatar_url: logo_url || editingAccount.logo_url,
+          });
+        }
         const { error: updateError } = await supabase
           .from('accounts')
           .update({
             name: form.name,
             account_type: form.account_type,
+            pos_email: form.account_type === 'business' ? posEmail : null,
+            pos_user_id: posUserId,
             contacts: form.contacts.trim(),
             country: country.name,
             town: form.town.trim(),
@@ -197,6 +269,7 @@ export default function AdminAccountsPage() {
         await createManagedAccount(supabase, {
           name: form.name,
           email: form.email,
+          pos_email: form.account_type === 'business' && posEmail ? posEmail : null,
           contacts: form.contacts.trim(),
           password: form.password,
           account_type: form.account_type,
@@ -227,6 +300,7 @@ export default function AdminAccountsPage() {
     setForm({
       name: account.name,
       email: account.email,
+      pos_email: account.pos_email || '',
       contacts: account.contacts || '',
       password: '',
       account_type: account.account_type,
@@ -317,7 +391,10 @@ export default function AdminAccountsPage() {
         key: 'email',
         header: 'Email',
         render: (acc) => (
-          <span className="text-xs text-muted-foreground break-all">{acc.email}</span>
+          <div className="flex flex-col text-xs break-all">
+            <span className="text-muted-foreground">{acc.email}</span>
+            {acc.pos_email && <span className="text-blue-600">{acc.pos_email}</span>}
+          </div>
         ),
       },
       {
@@ -541,16 +618,56 @@ export default function AdminAccountsPage() {
                 />
               </div>
               <div>
+                <label className="block text-xs font-600 text-muted-foreground mb-1">
+                  Account Type *
+                </label>
+                <select
+                  value={form.account_type}
+                  onChange={(e) => {
+                    const accountType = e.target.value as NewAccountForm['account_type'];
+                    setForm((current) => ({
+                      ...current,
+                      account_type: accountType,
+                    }));
+                  }}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
+                >
+                  <option value="store">Store</option>
+                  <option value="business">Business</option>
+                </select>
+              </div>
+              <div>
                 <label className="block text-xs font-600 text-muted-foreground mb-1">Email *</label>
                 <input
                   required
                   type="email"
                   disabled={!!editingAccount}
                   value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  onChange={(e) => {
+                    const email = e.target.value;
+                    setForm((current) => ({ ...current, email }));
+                  }}
                   className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
                 />
               </div>
+              {form.account_type === 'business' && (
+                <div>
+                  <label className="block text-xs font-600 text-muted-foreground mb-1">
+                    POS Email
+                  </label>
+                  <input
+                    type="email"
+                    value={form.pos_email}
+                    onChange={(e) => setForm({ ...form, pos_email: e.target.value })}
+                    aria-describedby="pos-email-description"
+                    placeholder="Enter POS email"
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
+                  />
+                  <p id="pos-email-description" className="text-xs text-muted-foreground mt-1">
+                    Optional. Assign an email here to enable POS, Sales, and Credits access.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-600 text-muted-foreground mb-1">
                   Contacts
@@ -585,25 +702,14 @@ export default function AdminAccountsPage() {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {editingAccount
-                    ? 'Leave blank to keep the current password'
-                    : 'The user will log in with this password'}
+                  {editingAccount && form.account_type === 'business' && !editingAccount.pos_user_id
+                    ? 'Enter the current main account password to create the POS login'
+                    : editingAccount && form.account_type === 'business'
+                      ? 'Leave blank to keep the POS login; enter the current main account password to create or change the POS login'
+                      : editingAccount
+                        ? 'Leave blank to keep the current password'
+                        : 'The user will log in with this password'}
                 </p>
-              </div>
-              <div>
-                <div>
-                  <label className="block text-xs font-600 text-muted-foreground mb-1">
-                    Account Type *
-                  </label>
-                  <select
-                    value={form.account_type}
-                    onChange={(e) => setForm({ ...form, account_type: e.target.value as any })}
-                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
-                  >
-                    <option value="store">Store</option>
-                    <option value="business">Business</option>
-                  </select>
-                </div>
               </div>
               <div>
                 <label className="block text-xs font-600 text-muted-foreground mb-1">

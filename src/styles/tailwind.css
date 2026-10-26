@@ -24,10 +24,12 @@
   --color-success-foreground: var(--success-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
-  --font-sans: var(--font-plus-jakarta-sans), sans-serif;
+  --font-sans: var(--font-plus-jakarta-sans);
 }
 
 :root {
+  --font-plus-jakarta-sans: "Segoe UI", system-ui, sans-serif;
+  --font-montserrat: "Arial", "Helvetica", sans-serif;
   --background: #f8fafc;
   --foreground: #0f172a;
   --primary: #1a56db;
@@ -44,7 +46,7 @@
   --input: #e2e8f0;
   --ring: #1a56db;
   --radius: 0.5rem;
-  --font-sans: var(--font-plus-jakarta-sans), sans-serif;
+  --font-sans: var(--font-plus-jakarta-sans);
 
   --warning: #f59e0b;
   --warning-foreground: #ffffff;

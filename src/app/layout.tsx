@@ -1,25 +1,10 @@
 import React from 'react';
 import type { Metadata, Viewport } from 'next';
-import { Plus_Jakarta_Sans, Montserrat } from 'next/font/google';
 import '../styles/tailwind.css';
 import { Toaster } from 'sonner';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import SplashWrapper from '@/components/SplashWrapper';
-
-const plusJakartaSans = Plus_Jakarta_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
-  variable: '--font-plus-jakarta-sans',
-  display: 'swap',
-});
-
-const montserrat = Montserrat({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800', '900'],
-  variable: '--font-montserrat',
-  display: 'swap',
-});
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -51,8 +36,8 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${plusJakartaSans.variable} ${montserrat.variable}`}>
-      <body className={plusJakartaSans.className}>
+    <html lang="en" suppressHydrationWarning>
+      <body>
         <AuthProvider>
           <ThemeProvider>
             <SplashWrapper>

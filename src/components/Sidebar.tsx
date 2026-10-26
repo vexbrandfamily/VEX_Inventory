@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, CreditCard, BarChart2, MessageSquare, Settings, Package, ArrowDownToLine, ArrowUpFromLine, ShoppingCart, ShoppingBag, TrendingDown, Home, Layers, PackageCheck, PackageMinus, PanelLeft, Check } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, BarChart2, MessageSquare, Settings, Package, ArrowDownToLine, ArrowUpFromLine, ShoppingCart, ShoppingBag, TrendingDown, Home, Layers, PackageCheck, PackageMinus, PanelLeft, Check, HandCoins, BadgeDollarSign } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AccountAvatar from '@/components/AccountAvatar';
 import { useStableAccountIdentity } from '@/hooks/useStableAccountIdentity';
@@ -51,9 +51,10 @@ const businessNavItems: NavItem[] = [
   { id: 'nav-biz-stocklevel', label: 'Stock Level', href: '/business-stock', icon: Layers, group: 'inventory' },
   { id: 'nav-biz-pos', label: 'Point of Sale', href: '/business-pos', icon: ShoppingCart, group: 'sales' },
   { id: 'nav-biz-stockout-sales', label: 'Sales', href: '/business-sales', icon: TrendingDown, group: 'sales' },
+  { id: 'nav-biz-debts', label: 'Debts', href: '/business-debts', icon: HandCoins, group: 'accounts' },
+  { id: 'nav-biz-credits', label: 'Credits', href: '/business-credits', icon: BadgeDollarSign, group: 'accounts' },
   { id: 'nav-biz-stockin', label: 'Adjustments In', href: '/business-adjustments-in', icon: ArrowDownToLine, group: 'movements' },
   { id: 'nav-biz-stockout', label: 'Adjustments Out', href: '/business-adjustments-out', icon: ArrowUpFromLine, group: 'movements' },
-  { id: 'nav-biz-settings', label: 'Settings', href: '/business-settings', icon: Settings, group: 'system' },
 ];
 
 const navMap = {
@@ -75,8 +76,12 @@ export default function Sidebar({ accountType }: SidebarProps) {
   const [controlOpen, setControlOpen] = useState(false);
   const controlRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
-  const navItems = navMap[accountType];
   const { profile, user } = useAuth();
+  const navItems = profile?.is_pos_user
+    ? businessNavItems.filter((item) =>
+        ['/business-pos', '/business-sales', '/business-credits'].includes(item.href)
+      )
+    : navMap[accountType];
   const storageKey = `vex-sidebar-control:${user?.id ?? 'anonymous'}`;
   const expanded = sidebarMode === 'expanded' || (sidebarMode === 'hover' && pointerInside);
   const { displayName, logoUrl } = useStableAccountIdentity(profile, user);
@@ -147,7 +152,9 @@ export default function Sidebar({ accountType }: SidebarProps) {
         {expanded && (
           <div className="min-w-0">
             <p className="truncate text-xs font-600 text-foreground">{displayName}</p>
-            <p className="truncate text-xs text-muted-foreground">{roleLabels[accountType]}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {profile?.is_pos_user ? 'POS Access' : roleLabels[accountType]}
+            </p>
           </div>
         )}
       </div>

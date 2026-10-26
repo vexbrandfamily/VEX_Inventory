@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import {
   ACCOUNT_SUSPENDED_QUERY,
   homeForAccountType,
+  isPosAccount,
   isAccountSuspended,
   resolveAccountType,
 } from '@/lib/auth/resolveAccountType';
@@ -27,7 +28,7 @@ function pathRequiresType(pathname: string): 'admin' | 'store' | 'business' | nu
   return null;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   injectTokenFromHeader(request);
   let supabaseResponse = NextResponse.next({ request });
 
@@ -90,11 +91,24 @@ export async function middleware(request: NextRequest) {
   }
 
   const accountType = user ? await resolveAccountType(supabase, user) : 'admin';
+  const isPosUser = user ? await isPosAccount(supabase, user) : false;
 
   if (user && (pathname === '/login' || pathname === '/register')) {
     const url = request.nextUrl.clone();
-    url.pathname = homeForAccountType(accountType);
+    url.pathname = isPosUser ? '/business-pos' : homeForAccountType(accountType);
     return NextResponse.redirect(url);
+  }
+
+  if (isPosUser && isProtected) {
+    const allowedPosPages = ['/business-pos', '/business-sales', '/business-credits'];
+    const isAllowedPosPage = allowedPosPages.some(
+      (path) => pathname === path || pathname.startsWith(`${path}/`)
+    );
+    if (!isAllowedPosPage) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/business-pos';
+      return NextResponse.redirect(url);
+    }
   }
 
   if (user) {
@@ -110,5 +124,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 };

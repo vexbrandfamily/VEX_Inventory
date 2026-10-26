@@ -38,24 +38,26 @@ interface PrintableSale {
   balance?: number;
 }
 
-type PaymentMethod = 'Cash' | 'Transfers' | 'Invoice' | 'Mobile';
+type PaymentMethod = 'Cash' | 'Transfers' | 'Credit' | 'Mobile';
 
 const paymentIcons: Record<PaymentMethod, React.ElementType> = {
   Cash: Banknote,
   Transfers: CreditCard,
   Mobile: Smartphone,
-  Invoice: FileText,
+  Credit: FileText,
 };
 
 export default function BusinessPOSPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [discountAmount, setDiscountAmount] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
   const [cashReceived, setCashReceived] = useState('');
   const [accountId, setAccountId] = useState<string | null>(null);
@@ -84,6 +86,16 @@ export default function BusinessPOSPage() {
         .maybeSingle();
       nextAccountId = accountByUserId?.id ?? null;
       nextAccountName = accountByUserId?.name ?? '';
+    }
+
+    if (!nextAccountId && user?.id) {
+      const { data: accountByPosUserId } = await supabase
+        .from('accounts')
+        .select('id, name')
+        .eq('pos_user_id', user.id)
+        .maybeSingle();
+      nextAccountId = accountByPosUserId?.id ?? null;
+      nextAccountName = accountByPosUserId?.name ?? '';
     }
 
     if (!nextAccountId && user?.email) {
@@ -148,17 +160,24 @@ export default function BusinessPOSPage() {
     );
   };
 
-  const updateQty = (productId: string, delta: number) => {
-    setCart((prev) =>
-      prev.map((c) => c.product.id === productId
-        ? { ...c, quantity: Math.max(1, Math.min(c.quantity + delta, c.product.current_stock)) }
-        : c
-      )
-    );
+  const adjustItemQuantity = (productId: string, adjustment: number) => {
+    const item = cart.find((cartItem) => cartItem.product.id === productId);
+    if (!item) return;
+    setQuantityDrafts((prev) => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+    setItemQuantity(productId, item.quantity + adjustment);
   };
 
   const removeFromCart = (productId: string) => {
     setCart((prev) => prev.filter((c) => c.product.id !== productId));
+    setQuantityDrafts((prev) => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
   };
 
   const subtotal = cart.reduce((sum, c) => sum + c.product.selling_price * c.quantity, 0);
@@ -167,9 +186,16 @@ export default function BusinessPOSPage() {
   const totalAfterDiscount = Math.max(subtotal - safeDiscountAmount, 0);
   const safeCashReceived = Math.max(Number(cashReceived) || 0, 0);
   const cashBalance = safeCashReceived - totalAfterDiscount;
-  const checkoutDisabled = cart.length === 0 || processing || (paymentMethod === 'Cash' && safeCashReceived < totalAfterDiscount);
+  const checkoutDisabled = cart.length === 0
+    || processing
+    || (paymentMethod === 'Cash' && safeCashReceived < totalAfterDiscount)
+    || (paymentMethod === 'Credit' && !customerName.trim());
 
   const handleCheckout = async () => {
+    if (paymentMethod === 'Credit' && !customerName.trim()) {
+      setError('Customer name is required for credit payments.');
+      return;
+    }
     if (checkoutDisabled) return;
     setProcessing(true);
     setError(null);
@@ -198,6 +224,7 @@ export default function BusinessPOSPage() {
         itemCount,
         discountAmount: safeDiscountAmount,
         paymentMethod,
+        customerName,
         detail,
       });
 
@@ -220,6 +247,7 @@ export default function BusinessPOSPage() {
           discount_amount: safeDiscountAmount,
           reference_number: refNumber,
           payment_method: paymentMethod,
+          customer_name: customerName.trim(),
           notes: detail,
         });
         if (saleErr) throw saleErr;
@@ -239,11 +267,12 @@ export default function BusinessPOSPage() {
 
       setCart([]);
       setDiscountAmount('');
+      setCustomerName('');
       setCashReceived('');
       setSuccess(null);
       setPrintableSale({
         accountName: printableBusinessName,
-        documentType: paymentMethod === 'Invoice' ? 'Invoice' : 'Receipt',
+        documentType: paymentMethod === 'Credit' ? 'Invoice' : 'Receipt',
         referenceNumber: refNumber,
         paymentMethod,
         createdAt: new Date().toLocaleString(),
@@ -379,22 +408,44 @@ export default function BusinessPOSPage() {
                     </button>
                   </div>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => updateQty(item.product.id, -1)}
-                        className="w-6 h-6 rounded-md bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors">
-                        <Minus size={11} />
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        aria-label={`Decrease ${item.product.name} quantity`}
+                        onClick={() => adjustItemQuantity(item.product.id, -1)}
+                        disabled={item.quantity <= 1}
+                        className="w-7 h-7 rounded-md bg-muted flex items-center justify-center hover:bg-muted/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Minus size={14} />
                       </button>
                       <input
                         type="number"
                         min={1}
                         max={item.product.current_stock}
-                        value={item.quantity}
-                        onChange={(e) => setItemQuantity(item.product.id, Number(e.target.value || 1))}
-                        className="w-12 px-1 py-1 text-center text-sm font-700 bg-background border border-border rounded-md outline-none focus:ring-1 focus:ring-primary/30"
+                        value={quantityDrafts[item.product.id] ?? item.quantity}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (value === '') {
+                            setQuantityDrafts((prev) => ({ ...prev, [item.product.id]: '' }));
+                            return;
+                          }
+                          setQuantityDrafts((prev) => {
+                            const next = { ...prev };
+                            delete next[item.product.id];
+                            return next;
+                          });
+                          setItemQuantity(item.product.id, Number(value));
+                        }}
+                        className="w-16 appearance-none px-2 py-1 text-center text-sm font-700 bg-background border border-border rounded-md outline-none focus:ring-1 focus:ring-primary/30 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
-                      <button onClick={() => updateQty(item.product.id, 1)}
-                        className="w-6 h-6 rounded-md bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors">
-                        <Plus size={11} />
+                      <button
+                        type="button"
+                        aria-label={`Increase ${item.product.name} quantity`}
+                        onClick={() => adjustItemQuantity(item.product.id, 1)}
+                        disabled={item.quantity >= item.product.current_stock}
+                        className="w-7 h-7 rounded-md bg-muted flex items-center justify-center hover:bg-muted/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Plus size={14} />
                       </button>
                     </div>
                     <span className="text-sm font-700 text-foreground">
@@ -409,17 +460,15 @@ export default function BusinessPOSPage() {
           </div>
 
           {/* Checkout */}
-          <div className="flex-shrink-0 border-t border-border p-4 space-y-3">
+          <div className="min-h-0 overflow-y-auto overscroll-contain border-t border-border p-4 space-y-3">
             {error && <p className="text-xs text-danger bg-danger/10 rounded-lg px-3 py-2">{error}</p>}
             {success && <p className="text-xs text-success bg-success/10 rounded-lg px-3 py-2">{success}</p>}
 
             <div>
               <label className="block text-xs font-600 text-muted-foreground mb-1">Discount</label>
               <input
-                type="number"
-                min={0}
-                max={subtotal}
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 value={discountAmount}
                 onChange={(e) => setDiscountAmount(e.target.value)}
                 placeholder="0.00"
@@ -430,12 +479,16 @@ export default function BusinessPOSPage() {
             <div>
               <label className="block text-xs font-600 text-muted-foreground mb-1">Payment Method</label>
               <div className="flex gap-1 overflow-hidden">
-                {(['Cash', 'Transfers', 'Invoice', 'Mobile'] as PaymentMethod[]).map((method) => {
+                {(['Cash', 'Transfers', 'Credit', 'Mobile'] as PaymentMethod[]).map((method) => {
                   const Icon = paymentIcons[method];
                   return (
                     <button
                       key={method}
-                      onClick={() => setPaymentMethod(method)}
+                      onClick={() => {
+                        setPaymentMethod(method);
+                        setError(null);
+                        if (method !== 'Credit') setCustomerName('');
+                      }}
                       className={`flex min-w-0 flex-1 items-center justify-center gap-1 px-1.5 py-2 rounded-lg text-xs font-medium transition-all border ${
                         paymentMethod === method
                           ? 'bg-warning text-warning-foreground border-warning'
@@ -450,14 +503,32 @@ export default function BusinessPOSPage() {
               </div>
             </div>
 
+            {paymentMethod === 'Credit' && (
+              <div>
+                <label className="block text-xs font-600 text-muted-foreground mb-1">
+                  Customer Name <span className="text-danger">Required*</span>
+                </label>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => {
+                    setCustomerName(e.target.value);
+                    setError(null);
+                  }}
+                  placeholder="Enter customer name"
+                  required
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
+                />
+              </div>
+            )}
+
             {paymentMethod === 'Cash' && (
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs font-600 text-muted-foreground mb-1">Cash Given</label>
                   <input
-                    type="number"
-                    min={0}
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={cashReceived}
                     onChange={(e) => setCashReceived(e.target.value)}
                     placeholder="0.00"
