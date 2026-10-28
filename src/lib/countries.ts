@@ -115,6 +115,19 @@ export function getCountryByPhoneCode(phoneCode: string): CountryOption | undefi
   return countryCode ? getCountryByCode(countryCode) : undefined;
 }
 
+export function getCountryByName(name: string): CountryOption | undefined {
+  const normalized = name.trim().toLowerCase();
+  return COUNTRIES.find((country) => country.name.toLowerCase() === normalized);
+}
+
+export function getPhoneCodeByCountryCode(code: string): string {
+  return COUNTRY_PHONE_CODES[code] || '';
+}
+
+export function getDefaultCurrencyForPhoneCode(phoneCode: string): string {
+  return getCountryByPhoneCode(phoneCode)?.currency || '';
+}
+
 export function getCurrencySymbol(currencyCode: string): string {
   const major = MAJOR_CURRENCIES.find((c) => c.code === currencyCode);
   if (major) return major.symbol;

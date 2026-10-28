@@ -143,6 +143,24 @@ export default function BusinessStockOutView({
       nextAccountId = accountByUserId?.id ?? null;
     }
 
+    if (!nextAccountId && user?.id) {
+      const { data: accountByPosUserId } = await supabase
+        .from('accounts')
+        .select('id')
+        .eq('pos_user_id', user.id)
+        .maybeSingle();
+      nextAccountId = accountByPosUserId?.id ?? null;
+    }
+
+    if (!nextAccountId && user?.email) {
+      const { data: accountByPosEmail } = await supabase
+        .from('accounts')
+        .select('id')
+        .eq('pos_email', user.email)
+        .maybeSingle();
+      nextAccountId = accountByPosEmail?.id ?? null;
+    }
+
     if (!nextAccountId && user?.email) {
       const { data: accountByEmail } = await supabase
         .from('accounts')

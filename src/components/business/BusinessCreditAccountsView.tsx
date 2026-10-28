@@ -143,6 +143,15 @@ export default function BusinessCreditAccountsView({ type }: { type: CreditAccou
       nextAccountName = data?.name ?? '';
     }
     if (!nextAccountId && user?.email) {
+      const { data } = await supabase
+        .from('accounts')
+        .select('id, name')
+        .eq('pos_email', user.email)
+        .maybeSingle();
+      nextAccountId = data?.id ?? null;
+      nextAccountName = data?.name ?? '';
+    }
+    if (!nextAccountId && user?.email) {
       const { data } = await supabase.from('accounts').select('id, name').eq('email', user.email).maybeSingle();
       nextAccountId = data?.id ?? null;
       nextAccountName = data?.name ?? '';

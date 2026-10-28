@@ -42,7 +42,7 @@ async function invokeAccountFunction(
 }
 
 export async function createManagedAccount(adminClient: any, input: ManagedAccountInput) {
-  await invokeAccountFunction(adminClient, input);
+  return invokeAccountFunction(adminClient, input);
 }
 
 export async function createPosManagedUser(

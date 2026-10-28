@@ -19,7 +19,14 @@ import {
 import ResponsiveRecordList, { RecordColumn } from '@/components/ui/ResponsiveRecordList';
 import AccountAvatar from '@/components/AccountAvatar';
 import StatusBadge from '@/components/ui/StatusBadge';
-import { getCountryByPhoneCode, getCurrencySymbol } from '@/lib/countries';
+import {
+  getAvailableCurrencies,
+  getCountryByName,
+  getCountryByPhoneCode,
+  getCurrencySymbol,
+  getDefaultCurrencyForPhoneCode,
+  getPhoneCodeByCountryCode,
+} from '@/lib/countries';
 import { createManagedAccount, createPosManagedUser } from '@/lib/auth/createManagedAccount';
 
 interface Account {
@@ -134,11 +141,11 @@ export default function AdminAccountsPage() {
   );
 
   const handleCountryChange = (code: string) => {
-    const country = getCountryByPhoneCode(code);
+    const defaultCurrency = getDefaultCurrencyForPhoneCode(code);
     setForm((prev) => ({
       ...prev,
       country_code: code,
-      currency_code: country?.currency || prev.currency_code || 'USD',
+      currency_code: defaultCurrency || prev.currency_code,
     }));
   };
 
@@ -153,22 +160,13 @@ export default function AdminAccountsPage() {
       if (posEmail && posEmail === form.email.trim().toLowerCase()) {
         throw new Error('POS email must be different from the main account email.');
       }
-      if (
-        editingAccount &&
-        form.account_type === 'business' &&
-        editingAccount.pos_user_id &&
-        !posEmail
-      ) {
-        throw new Error('Enter the POS email for this account.');
-      }
-      if (
-        editingAccount &&
+      const needsPosLogin =
+        editingAccount !== null &&
         form.account_type === 'business' &&
         !!posEmail &&
         (!editingAccount.pos_user_id ||
-          posEmail !== (editingAccount.pos_email || '').toLowerCase()) &&
-        !form.password
-      ) {
+          posEmail !== (editingAccount.pos_email || '').toLowerCase());
+      if (needsPosLogin && !form.password) {
         throw new Error(
           'Enter the current main account password to create or update its POS login.'
         );
@@ -220,14 +218,14 @@ export default function AdminAccountsPage() {
 
       if (editingAccount) {
         let posUserId =
-          form.account_type === 'business' ? editingAccount.pos_user_id || null : null;
-        if (
+          form.account_type === 'business' && posEmail
+            ? editingAccount.pos_user_id || null
+            : null;
+        const posCredentialsNeedUpdate =
           form.account_type === 'business' &&
           !!posEmail &&
-          (!posUserId ||
-            posEmail !== (editingAccount.pos_email || '').toLowerCase() ||
-            form.password)
-        ) {
+          (needsPosLogin || posEmail !== (editingAccount.pos_email || '').toLowerCase() || !!form.password);
+        if (posCredentialsNeedUpdate) {
           posUserId = await createPosManagedUser(supabase, {
             account_id: editingAccount.id,
             main_email: editingAccount.email,
@@ -248,7 +246,7 @@ export default function AdminAccountsPage() {
             country: country.name,
             town: form.town.trim(),
             country_code: form.country_code,
-            currency_code: country.currency,
+            currency_code: form.currency_code || country.currency,
             ...(logo_url ? { logo_url } : {}),
           })
           .eq('id', editingAccount.id);
@@ -266,7 +264,7 @@ export default function AdminAccountsPage() {
           throw new Error(`Profile update failed: ${profileUpdateError.message}`);
         }
       } else {
-        await createManagedAccount(supabase, {
+        const created = await createManagedAccount(supabase, {
           name: form.name,
           email: form.email,
           pos_email: form.account_type === 'business' && posEmail ? posEmail : null,
@@ -276,9 +274,20 @@ export default function AdminAccountsPage() {
           country: country.name,
           town: form.town.trim(),
           country_code: form.country_code,
-          currency_code: country.currency,
+          currency_code: form.currency_code || country.currency,
           logo_url,
         });
+
+        if (form.account_type === 'business' && posEmail) {
+          const accountResult = created?.account as
+            | { pos_email?: string | null; pos_user_id?: string | null }
+            | undefined;
+          if (!accountResult?.pos_email || !accountResult?.pos_user_id) {
+            throw new Error(
+              'The account was created, but POS fields were missing. Redeploy the latest create-user Edge Function and run supabase/schema.sql, then edit this account to create the POS login again.'
+            );
+          }
+        }
       }
 
       setShowAddModal(false);
@@ -296,6 +305,11 @@ export default function AdminAccountsPage() {
   };
 
   const openEdit = (account: Account) => {
+    const countryByName = getCountryByName(account.country);
+    const countryCode = account.country_code ||
+      getPhoneCodeByCountryCode(countryByName?.code || '');
+    const countryByPhoneCode = getCountryByPhoneCode(countryCode);
+    const country = countryByPhoneCode || countryByName;
     setEditingAccount(account);
     setForm({
       name: account.name,
@@ -305,8 +319,8 @@ export default function AdminAccountsPage() {
       password: '',
       account_type: account.account_type,
       town: account.town || '',
-      country_code: account.country_code || '',
-      currency_code: account.currency_code || 'USD',
+      country_code: countryCode,
+      currency_code: account.currency_code || country?.currency || 'USD',
     });
     setLogoFile(null);
     setLogoPreview(account.logo_url || '');
@@ -391,9 +405,15 @@ export default function AdminAccountsPage() {
         key: 'email',
         header: 'Email',
         render: (acc) => (
-          <div className="flex flex-col text-xs break-all">
-            <span className="text-muted-foreground">{acc.email}</span>
-            {acc.pos_email && <span className="text-blue-600">{acc.pos_email}</span>}
+          <div className="flex flex-col gap-0.5 text-xs break-all">
+            <span className="text-muted-foreground">
+              <span className="font-600">Main:</span> {acc.email}
+            </span>
+            {acc.pos_email && (
+              <span className="text-blue-600">
+                <span className="font-600">POS:</span> {acc.pos_email}
+              </span>
+            )}
           </div>
         ),
       },
@@ -637,7 +657,7 @@ export default function AdminAccountsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-600 text-muted-foreground mb-1">Email *</label>
+                <label className="block text-xs font-600 text-muted-foreground mb-1">Main Email *</label>
                 <input
                   required
                   type="email"
@@ -703,9 +723,9 @@ export default function AdminAccountsPage() {
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {editingAccount && form.account_type === 'business' && !editingAccount.pos_user_id
-                    ? 'Enter the current main account password to create the POS login'
+                    ? 'Enter the current main account password to create the POS login; leave POS email blank to remove it'
                     : editingAccount && form.account_type === 'business'
-                      ? 'Leave blank to keep the POS login; enter the current main account password to create or change the POS login'
+                      ? 'Leave blank to keep the POS login; enter the current main account password to create or change it; leave POS email blank to remove the login link'
                       : editingAccount
                         ? 'Leave blank to keep the current password'
                         : 'The user will log in with this password'}
@@ -746,13 +766,22 @@ export default function AdminAccountsPage() {
               </div>
               <div>
                 <label className="block text-xs font-600 text-muted-foreground mb-1">
-                  Currency
+                  Currency *
                 </label>
-                <div className="w-full px-3 py-2 text-sm bg-muted border border-border rounded-lg text-foreground">
-                  {selectedCountry
-                    ? `${getCurrencySymbol(selectedCountry.currency)} (${selectedCountry.currency})`
-                    : 'Enter a country code'}
-                </div>
+                <select
+                  required
+                  value={form.currency_code}
+                  onChange={(e) =>
+                    setForm((current) => ({ ...current, currency_code: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg outline-none focus:ring-1 focus:ring-primary/30"
+                >
+                  {getAvailableCurrencies(selectedCountry?.code).map((currency) => (
+                    <option key={currency.code} value={currency.code}>
+                      {getCurrencySymbol(currency.code)} ({currency.code}) {currency.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               {error && <p className="text-xs text-danger">{error}</p>}
               <div className="flex gap-3 pt-2">

@@ -99,6 +99,16 @@ export default function BusinessPOSPage() {
     }
 
     if (!nextAccountId && user?.email) {
+      const { data: accountByPosEmail } = await supabase
+        .from('accounts')
+        .select('id, name')
+        .eq('pos_email', user.email)
+        .maybeSingle();
+      nextAccountId = accountByPosEmail?.id ?? null;
+      nextAccountName = accountByPosEmail?.name ?? '';
+    }
+
+    if (!nextAccountId && user?.email) {
       const { data: accountByEmail } = await supabase
         .from('accounts')
         .select('id, name')
@@ -291,7 +301,7 @@ export default function BusinessPOSPage() {
   };
 
   return (
-    <AppLayout accountType="business" pageTitle="Point of Sale" pageSubtitle="Process sales transactions">
+    <AppLayout accountType="business" pageTitle="Point of Sale" pageSubtitle="Process sales transactions" hideMobileNav={Boolean(printableSale)}>
       <div className="flex flex-col lg:flex-row gap-5 min-h-[calc(100vh-8rem)] lg:h-[calc(100vh-8rem)]">
         {/* Product Grid */}
         <div className="min-w-0 flex-1 flex flex-col gap-4 overflow-hidden">
@@ -687,7 +697,7 @@ export default function BusinessPOSPage() {
                 onClick={() => setPrintableSale(null)}
                 className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted"
               >
-                Close
+                Cancel
               </button>
               <button
                 type="button"

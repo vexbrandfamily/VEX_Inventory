@@ -37,11 +37,45 @@ alter table public.accounts
 alter table public.accounts
   add column if not exists pos_email text;
 
+update public.accounts
+set pos_email = lower(trim(pos_email))
+where pos_email is not null and pos_email <> lower(trim(pos_email));
+
+update public.accounts
+set pos_email = null
+where pos_email is not null
+  and lower(trim(pos_email)) = lower(trim(email));
+
 alter table public.accounts
   add column if not exists pos_user_id uuid references auth.users(id) on delete set null;
 
 alter table public.accounts
   add column if not exists town text not null default '';
+
+alter table public.accounts
+  add column if not exists country text not null default '';
+
+alter table public.accounts
+  add column if not exists country_code text not null default '';
+
+alter table public.accounts
+  add column if not exists currency_code text not null default 'USD';
+
+alter table public.accounts
+  add column if not exists logo_url text not null default '';
+
+alter table public.accounts
+  add column if not exists email text not null default '';
+
+alter table public.accounts
+  add column if not exists account_type text;
+
+alter table public.accounts
+  add column if not exists name text not null default '';
+
+update public.accounts
+set currency_code = upper(trim(currency_code))
+where currency_code is not null and currency_code <> upper(trim(currency_code));
 
 -- Keep legacy account creation functions compatible until they are redeployed.
 alter table public.accounts
@@ -77,12 +111,51 @@ drop trigger if exists accounts_set_updated_at on public.accounts;
 
 create unique index if not exists accounts_email_lower_key
   on public.accounts (lower(email));
+update public.accounts
+set pos_email = lower(trim(pos_email))
+where pos_email is not null and pos_email <> lower(trim(pos_email));
+
 create unique index if not exists accounts_pos_email_lower_key
   on public.accounts (lower(pos_email))
   where pos_email is not null;
+
+create or replace function public.normalize_account_pos_email()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.pos_email is null or char_length(trim(new.pos_email)) = 0 then
+    new.pos_email := null;
+  else
+    new.pos_email := lower(trim(new.pos_email));
+  end if;
+
+  if new.account_type <> 'business' then
+    new.pos_email := null;
+    new.pos_user_id := null;
+  elsif new.pos_email is not null and lower(trim(new.pos_email)) = lower(trim(new.email)) then
+    raise exception 'POS email must be different from the main account email.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists accounts_normalize_pos_email on public.accounts;
+create trigger accounts_normalize_pos_email
+before insert or update of pos_email, pos_user_id, account_type, email on public.accounts
+for each row execute function public.normalize_account_pos_email();
+
 create unique index if not exists accounts_pos_user_id_key
   on public.accounts (pos_user_id)
   where pos_user_id is not null;
+
+-- Keep the business POS login separate from the account's main Auth login.
+alter table public.accounts drop constraint if exists accounts_pos_email_not_main_check;
+alter table public.accounts
+  add constraint accounts_pos_email_not_main_check
+  check (pos_email is null or lower(trim(pos_email)) <> lower(trim(email)));
 create index if not exists accounts_account_type_idx on public.accounts (account_type);
 
 create table if not exists public.user_profiles (

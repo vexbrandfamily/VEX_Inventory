@@ -12,6 +12,18 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+const COUNTRY_CURRENCY_BY_PHONE: Record<string, string> = {
+  '1': 'USD', '44': 'GBP', '61': 'AUD', '49': 'EUR', '33': 'EUR', '39': 'EUR',
+  '34': 'EUR', '31': 'EUR', '32': 'EUR', '41': 'CHF', '971': 'AED', '966': 'SAR',
+  '974': 'QAR', '965': 'KWD', '973': 'BHD', '968': 'OMR', '20': 'EGP', '962': 'JOD',
+  '961': 'LBP', '964': 'IQD', '90': 'TRY', '91': 'INR', '86': 'CNY', '81': 'JPY',
+  '82': 'KRW', '65': 'SGD', '60': 'MYR', '62': 'IDR', '63': 'PHP', '66': 'THB',
+  '84': 'VND', '92': 'PKR', '880': 'BDT', '234': 'NGN', '254': 'KES', '233': 'GHS',
+  '27': 'ZAR', '255': 'TZS', '256': 'UGX', '251': 'ETB', '212': 'MAD', '213': 'DZD',
+  '216': 'TND', '55': 'BRL', '52': 'MXN', '54': 'ARS', '57': 'COP', '56': 'CLP',
+  '64': 'NZD', '7': 'RUB', '380': 'UAH', '972': 'ILS', '852': 'HKD',
+};
+
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -308,6 +320,14 @@ Deno.serve(async (req) => {
         .eq('id', account.id);
       if (linkError) throw new Error(`Could not link POS login: ${linkError.message}`);
 
+      const { data: verifiedLogin, error: verifiedLoginError } =
+        await authClient.auth.signInWithPassword({ email: posEmail, password });
+      if (verifiedLoginError || verifiedLogin.user?.id !== posUserId) {
+        throw new Error(
+          'POS login was created, but Supabase could not verify the POS credentials. Confirm the POS email and password, then try again.'
+        );
+      }
+
       return jsonResponse({ success: true, pos_user_id: posUserId });
     }
 
@@ -315,10 +335,15 @@ Deno.serve(async (req) => {
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
     const password = typeof body.password === 'string' ? body.password : '';
     const accountType = body.account_type;
-    const country = typeof body.country === 'string' ? body.country : '';
+    const country = typeof body.country === 'string' ? body.country.trim() : '';
     const town = typeof body.town === 'string' ? body.town.trim() : '';
     const countryCode = typeof body.country_code === 'string' ? body.country_code : '';
-    const currencyCode = typeof body.currency_code === 'string' ? body.currency_code : 'USD';
+    const suppliedCurrencyCode =
+      typeof body.currency_code === 'string' && /^[A-Z]{3}$/i.test(body.currency_code.trim())
+        ? body.currency_code.trim().toUpperCase()
+        : '';
+    const currencyCode =
+      suppliedCurrencyCode || COUNTRY_CURRENCY_BY_PHONE[countryCode.replace(/\D/g, '')] || 'USD';
     const contacts = typeof body.contacts === 'string' ? body.contacts : '';
     const logoUrl = typeof body.logo_url === 'string' ? body.logo_url : '';
     const posEmail =

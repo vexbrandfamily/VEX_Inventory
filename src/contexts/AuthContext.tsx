@@ -90,10 +90,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       .select('id, name, logo_url')
       .eq('pos_user_id', userId)
       .maybeSingle();
+    let posAccountMatched = !!posAccount;
     if (posAccountError) throw new Error(`Could not verify POS account: ${posAccountError.message}`);
     if (posAccount) {
       accountName = posAccount.name || accountName;
       logoUrl = posAccount.logo_url || logoUrl;
+    } else if (email) {
+      const { data: posAccountByEmail } = await supabase
+        .from('accounts')
+        .select('id, name, logo_url')
+        .eq('pos_email', email)
+        .maybeSingle();
+      if (posAccountByEmail) {
+        posAccountMatched = true;
+        accountName = posAccountByEmail.name || accountName;
+        logoUrl = posAccountByEmail.logo_url || logoUrl;
+      }
     }
 
     const nextProfile: UserProfile = {
@@ -103,7 +115,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       avatar_url: logoUrl || '',
       account_type: accountType,
       is_active: data?.is_active ?? true,
-      is_pos_user: !!posAccount,
+      is_pos_user: posAccountMatched,
     };
 
     if (accountType === 'admin' && data?.account_type !== 'admin') {

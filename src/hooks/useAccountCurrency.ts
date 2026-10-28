@@ -32,6 +32,15 @@ export function useAccountCurrency() {
       const result = await supabase
         .from('accounts')
         .select('currency_code')
+        .eq('pos_email', user.email)
+        .maybeSingle();
+      data = result.data;
+    }
+
+    if (!data && user?.email) {
+      const result = await supabase
+        .from('accounts')
+        .select('currency_code')
         .eq('email', user.email)
         .maybeSingle();
       data = result.data;

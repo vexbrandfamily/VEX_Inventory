@@ -14,9 +14,10 @@ interface AppLayoutProps {
   pageTitle: string;
   pageSubtitle?: string;
   onBack?: () => void;
+  hideMobileNav?: boolean;
 }
 
-export default function AppLayout({ children, accountType, pageTitle, pageSubtitle, onBack }: AppLayoutProps) {
+export default function AppLayout({ children, accountType, pageTitle, pageSubtitle, onBack, hideMobileNav = false }: AppLayoutProps) {
   const isMobileNav = accountType === 'store' || accountType === 'business' || accountType === 'admin';
   const pathname = usePathname();
   const { profile } = useAuth();
@@ -88,7 +89,7 @@ export default function AppLayout({ children, accountType, pageTitle, pageSubtit
         </main>
       </div>
 
-      {isMobileNav && (
+      {isMobileNav && !hideMobileNav && (
         <div className="md:hidden">
           <MobileBottomNav accountType={accountType} isPosUser={isPosUser} />
         </div>

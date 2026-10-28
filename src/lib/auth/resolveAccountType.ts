@@ -38,8 +38,6 @@ export async function resolveAccountType(supabase: any, user: AuthLikeUser): Pro
     if (posAccount?.account_type === 'business') return 'business';
   }
 
-  if (user?.user_metadata?.is_pos_user === true) return 'admin';
-
   const email = user?.email?.trim();
   if (email) {
     const { data: account } = await supabase
@@ -52,7 +50,16 @@ export async function resolveAccountType(supabase: any, user: AuthLikeUser): Pro
     if (account?.account_type === 'store' || account?.account_type === 'business') {
       return account.account_type;
     }
+
+    const { data: posAccountByEmail } = await supabase
+      .from('accounts')
+      .select('account_type')
+      .eq('pos_email', email)
+      .maybeSingle();
+    if (posAccountByEmail?.account_type === 'business') return 'business';
   }
+
+  if (user?.user_metadata?.is_pos_user === true) return 'admin';
 
   const meta = (user?.user_metadata?.account_type || user?.app_metadata?.account_type) as
     | string
@@ -66,13 +73,23 @@ export async function resolveAccountType(supabase: any, user: AuthLikeUser): Pro
 
 export async function isPosAccount(supabase: any, user: AuthLikeUser): Promise<boolean> {
   if (!user?.id) return false;
-  const { data, error } = await supabase
+  const { data: accountByUserId, error } = await supabase
     .from('accounts')
     .select('id')
     .eq('pos_user_id', user.id)
     .maybeSingle();
   if (error) throw new Error(`Could not verify POS account: ${error.message}`);
-  return !!data;
+  if (accountByUserId) return true;
+
+  const email = user?.email?.trim();
+  if (!email) return false;
+  const { data: accountByPosEmail, error: posEmailError } = await supabase
+    .from('accounts')
+    .select('id')
+    .eq('pos_email', email)
+    .maybeSingle();
+  if (posEmailError) throw new Error(`Could not verify POS account email: ${posEmailError.message}`);
+  return !!accountByPosEmail;
 }
 
 export async function isAccountSuspended(supabase: any, user: AuthLikeUser): Promise<boolean> {
@@ -119,6 +136,13 @@ export async function isAccountSuspended(supabase: any, user: AuthLikeUser): Pro
       .in('account_type', ['store', 'business'])
       .maybeSingle();
     if (account?.status === 'suspended') return true;
+
+    const { data: posAccount } = await supabase
+      .from('accounts')
+      .select('status')
+      .eq('pos_email', email)
+      .maybeSingle();
+    if (posAccount?.status === 'suspended') return true;
   }
 
   return false;

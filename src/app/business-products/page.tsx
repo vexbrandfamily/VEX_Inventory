@@ -113,6 +113,7 @@ export default function BusinessProductsPage() {
         .from('business_products')
         .select('*')
         .eq('account_id', currentAccountId)
+        .neq('status', 'inactive')
         .order('name', { ascending: true });
       setProducts(await fetchAllRows((from, to) => query.range(from, to)));
     } catch (e: any) {
@@ -199,10 +200,25 @@ export default function BusinessProductsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this product?')) return;
-    const { error: err } = await supabase.from('business_products').delete().eq('id', id);
-    if (err) setError(err.message);
-    else void fetchProducts();
+    if (!confirm('Archive this product? Its transaction history will be preserved.')) return;
+
+    try {
+      const currentAccountId = accountId ?? (await loadAccountId());
+      if (!currentAccountId) {
+        throw new Error('Business account not found.');
+      }
+
+      const { error: err } = await supabase
+        .from('business_products')
+        .update({ status: 'inactive' })
+        .eq('id', id)
+        .eq('account_id', currentAccountId);
+
+      if (err) throw err;
+      await fetchProducts();
+    } catch (e: any) {
+      setError(e.message);
+    }
   };
 
   const categoryColors: Record<string, string> = {
@@ -250,7 +266,7 @@ export default function BusinessProductsPage() {
             className="p-1.5 rounded-lg hover:bg-muted transition-colors">
             <Eye size={14} className="text-muted-foreground" />
           </button>
-          <button title="Delete product" onClick={() => handleDelete(p.id)}
+          <button title="Archive product" onClick={() => handleDelete(p.id)}
             className="p-1.5 rounded-lg hover:bg-danger/10 transition-colors">
             <Trash2 size={14} className="text-danger" />
           </button>
