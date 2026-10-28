@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import MobileBottomNav, { getMobileClassificationForPath } from '@/components/MobileBottomNav';
@@ -20,8 +20,10 @@ interface AppLayoutProps {
 export default function AppLayout({ children, accountType, pageTitle, pageSubtitle, onBack, hideMobileNav = false }: AppLayoutProps) {
   const isMobileNav = accountType === 'store' || accountType === 'business' || accountType === 'admin';
   const pathname = usePathname();
-  const { profile } = useAuth();
-  const isPosUser = profile?.is_pos_user ?? false;
+  const router = useRouter();
+  const { profile, loading } = useAuth();
+  const isPosUser = profile?.is_pos_user === true;
+  const profileReady = !loading && profile !== null;
   const homePath = accountType === 'admin' ? '/' : `/${accountType}-home`;
   const isHomePage = pathname === homePath;
   const mobileBackClassification = getMobileClassificationForPath(accountType, pathname, isPosUser);
@@ -65,6 +67,27 @@ export default function AppLayout({ children, accountType, pageTitle, pageSubtit
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, [isHomePage]);
+
+  const isPosRestrictedPage = isPosUser && (
+    pathname.startsWith('/business-settings') ||
+    pathname.startsWith('/business-notifications')
+  );
+
+  useEffect(() => {
+    if (profileReady && isPosRestrictedPage) {
+      router.replace('/business-pos');
+    }
+  }, [isPosRestrictedPage, profileReady, router]);
+
+  if (!profileReady || isPosRestrictedPage) {
+    return (
+      <ThemeShell>
+        <div className="flex-1 h-screen flex items-center justify-center bg-background">
+          <div className="w-7 h-7 rounded-full border-2 border-primary/30 border-t-primary animate-spin" aria-label="Loading account" />
+        </div>
+      </ThemeShell>
+    );
+  }
 
   return (
     <ThemeShell>

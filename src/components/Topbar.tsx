@@ -49,12 +49,13 @@ export default function Topbar({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const { profile, user, signOut } = useAuth();
+  const isPosUser = profile?.is_pos_user === true;
   const router = useRouter();
   const { displayName, logoUrl, email } = useStableAccountIdentity(profile, user);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
 
   useEffect(() => {
-    if (accountType === 'admin' || !user?.email) {
+    if (accountType === 'admin' || isPosUser || !user?.email) {
       setHasUnreadNotifications(false);
       return;
     }
@@ -104,7 +105,7 @@ export default function Topbar({
       window.removeEventListener('storage', syncOnStorageChange);
       window.removeEventListener('focus', syncOnFocus);
     };
-  }, [accountType, user?.email]);
+  }, [accountType, isPosUser, user?.email]);
 
   useEffect(() => {
     if (!accountMenuOpen) return;
@@ -180,13 +181,13 @@ export default function Topbar({
                 )}
               </div>
               <span className={`hidden sm:inline-flex text-xs font-600 px-2 py-0.5 rounded-full ${accountColors[accountType]}`}>
-                {accountBadgeLabels[accountType]}
+                {isPosUser ? 'POS Access' : accountBadgeLabels[accountType]}
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {accountType !== 'admin' && (
+            {accountType !== 'admin' && !isPosUser && (
               <button
                 type="button"
                 aria-label="Open notifications"
@@ -197,7 +198,7 @@ export default function Topbar({
                 {hasUnreadNotifications && <span className="absolute top-1 right-1 w-2 h-2 bg-danger rounded-full" />}
               </button>
             )}
-            {accountType === 'business' && (
+            {accountType === 'business' && !isPosUser && (
               <button
                 type="button"
                 aria-label="Open system settings"
@@ -227,7 +228,7 @@ export default function Topbar({
                     <AccountAvatar name={displayName} logoUrl={logoUrl} accountType={accountType} size={40} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-600 text-foreground" title={displayName}>{displayName}</p>
-                      <p className="truncate text-xs text-muted-foreground">{accountRoleLabels[accountType]}</p>
+                      <p className="truncate text-xs text-muted-foreground">{isPosUser ? 'POS Access' : accountRoleLabels[accountType]}</p>
                       {email && <p className="truncate text-xs text-muted-foreground" title={email}>{email}</p>}
                     </div>
                   </div>

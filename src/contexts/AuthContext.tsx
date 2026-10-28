@@ -166,19 +166,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       void (async () => {
-        if (nextSession?.user?.id && (await rejectIfSuspended(nextSession.user))) {
+        if (event === 'SIGNED_OUT' || !nextSession?.user) {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
           setLoading(false);
           return;
         }
-        setSession(nextSession);
-        setUser(nextSession?.user ?? null);
-        if (nextSession?.user?.id) {
-          await loadProfile(nextSession.user.id, nextSession.user);
-        } else {
-          setProfile(null);
+        if (nextSession.user.id && (await rejectIfSuspended(nextSession.user))) {
+          setLoading(false);
+          return;
         }
+        setLoading(true);
+        setSession(nextSession);
+        setUser(nextSession.user);
+        await loadProfile(nextSession.user.id, nextSession.user);
         setLoading(false);
       })();
     });
@@ -220,9 +224,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    setLoading(true);
     setProfile(null);
+    setSession(null);
+    setUser(null);
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setLoading(false);
+      throw error;
+    }
+    setLoading(false);
   };
 
   const getCurrentUser = async () => {

@@ -77,7 +77,9 @@ export default function Sidebar({ accountType }: SidebarProps) {
   const controlRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const { profile, user } = useAuth();
-  const navItems = profile?.is_pos_user
+  const navItems = profile === null
+    ? []
+    : profile.is_pos_user
     ? businessNavItems.filter((item) =>
         ['/business-pos', '/business-sales', '/business-credits'].includes(item.href)
       )

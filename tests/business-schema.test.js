@@ -39,30 +39,22 @@ for (const column of requiredSchemaColumns) {
   assert(schemaText.includes(column), `Missing schema support for: ${column}`);
 }
 
-assert(
-  schemaText.includes('add column if not exists monthly_amount'),
-  'Accounts must keep monthly_amount so account inserts match the live PostgREST schema.'
-);
-assert(
-  schemaText.includes('add column if not exists plan text') &&
-    !schemaText.includes('drop column if exists plan'),
-  'Accounts must keep the legacy plan column for compatibility with deployed account creation functions.'
-);
-assert(
-  schemaText.includes('add column if not exists registered_date date') &&
-    !schemaText.includes('drop column if exists registered_date'),
-  'Accounts must keep the legacy registered_date column for compatibility with deployed account creation functions.'
-);
-assert(
-  schemaText.includes('add column if not exists subscription_expiry date') &&
-    !schemaText.includes('drop column if exists subscription_expiry'),
-  'Accounts must keep the legacy subscription_expiry column for compatibility with deployed account creation functions.'
-);
-assert(
-  schemaText.includes('add column if not exists subscription_status text') &&
-    !schemaText.includes('drop column if exists subscription_status'),
-  'Accounts must keep the legacy subscription_status column for compatibility with deployed account creation functions.'
-);
+for (const legacyColumn of [
+  'monthly_amount',
+  'plan',
+  'registered_date',
+  'subscription_expiry',
+  'subscription_status',
+]) {
+  assert(
+    !new RegExp(`add column if not exists ${legacyColumn}(?:\\s|,)`).test(schemaText),
+    `Accounts must not re-add the legacy ${legacyColumn} column.`
+  );
+  assert(
+    new RegExp(`drop column if exists ${legacyColumn}`).test(schemaText),
+    `Accounts must drop the legacy ${legacyColumn} column.`
+  );
+}
 assert(
   schemaText.includes('create table if not exists public.business_products'),
   'Business products table missing'

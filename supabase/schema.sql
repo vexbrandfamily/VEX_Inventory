@@ -19,11 +19,6 @@ create table if not exists public.accounts (
   country_code text not null default '',
   currency_code text not null default 'USD' check (currency_code ~ '^[A-Z]{3}$'),
   logo_url text not null default '',
-  plan text,
-  registered_date date,
-  subscription_status text,
-  subscription_expiry date,
-  monthly_amount numeric(12,2) not null default 0,
   status text not null default 'active' check (status in ('active', 'suspended'))
 );
 
@@ -77,22 +72,13 @@ update public.accounts
 set currency_code = upper(trim(currency_code))
 where currency_code is not null and currency_code <> upper(trim(currency_code));
 
--- Keep legacy account creation functions compatible until they are redeployed.
+-- Remove fields from the accounts schema that are not used by account creation.
 alter table public.accounts
-  add column if not exists plan text;
-
-alter table public.accounts
-  add column if not exists registered_date date;
-
-alter table public.accounts
-  add column if not exists subscription_status text;
-
-alter table public.accounts
-  add column if not exists subscription_expiry date;
-
--- Existing databases created before monthly_amount was dropped, then re-added for create-user compatibility.
-alter table public.accounts
-  add column if not exists monthly_amount numeric(12,2) not null default 0;
+  drop column if exists plan,
+  drop column if exists registered_date,
+  drop column if exists subscription_status,
+  drop column if exists subscription_expiry,
+  drop column if exists monthly_amount;
 
 alter table public.accounts drop constraint if exists accounts_status_check;
 alter table public.accounts
