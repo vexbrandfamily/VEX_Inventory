@@ -71,8 +71,8 @@ const businessClassificationItems: Record<string, { label: string; icon: React.E
 };
 
 const posClassifications = [
-  { id: 'pos', label: 'POS', icon: ShoppingCart, href: '/business-pos' },
   { id: 'sales', label: 'Sales', icon: TrendingDown, href: '/business-sales' },
+  { id: 'pos', label: 'POS', icon: ShoppingCart, href: '/business-pos' },
   { id: 'credits', label: 'Credits', icon: BadgeDollarSign, href: '/business-credits' },
 ];
 
@@ -387,7 +387,7 @@ export default function MobileBottomNav({ accountType, isPosUser = false }: Mobi
       <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card/90 backdrop-blur-xl border-t border-border h-16 flex items-stretch">
         {classifications.map((cls) => {
           const CIcon = cls.icon;
-          const isHomeOrDash = cls.id === 'home' || cls.id === 'dashboard';
+          const isHomeOrDash = cls.id === 'home' || cls.id === 'dashboard' || cls.id === 'pos';
           const isActive = activeClassification === cls.id || isClassificationActive(cls.id, (cls as any).href);
           const isOpen = activeClassification === cls.id;
 
